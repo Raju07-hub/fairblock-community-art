@@ -17,11 +17,11 @@ export default function SubmitPage() {
     if (!f) return;
     const okTypes = ["image/png", "image/jpeg", "image/webp"];
     if (!okTypes.includes(f.type)) {
-      alert("File harus PNG/JPG/WEBP.");
+      alert("File must be PNG, JPG, or WEBP.");
       return;
     }
     if (f.size > 8 * 1024 * 1024) {
-      alert("Maksimal 8MB.");
+      alert("Maximum file size is 8MB.");
       return;
     }
     setFileName(f.name);
@@ -39,7 +39,6 @@ export default function SubmitPage() {
     setIsDragging(false);
     const f = e.dataTransfer.files?.[0];
     if (f) {
-      // set ke input supaya ikut terkirim FormData
       if (fileInputRef.current) {
         const dt = new DataTransfer();
         dt.items.add(f);
@@ -72,10 +71,13 @@ export default function SubmitPage() {
 
       const text = await res.text();
       let data: any;
-      try { data = JSON.parse(text); } catch { throw new Error(text || "Response non-JSON"); }
-      if (!res.ok || !data?.success) throw new Error(data?.error || "Upload gagal");
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(text || "Non-JSON response");
+      }
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Upload failed");
 
-      // simpan deleteToken supaya hanya pengunggah bisa hapus
       try {
         const raw = localStorage.getItem("fairblock_tokens");
         const map: Record<string, string> = raw ? JSON.parse(raw) : {};
@@ -83,13 +85,13 @@ export default function SubmitPage() {
         localStorage.setItem("fairblock_tokens", JSON.stringify(map));
       } catch {}
 
-      alert("Upload sukses!");
+      alert("Upload successful!");
       form.reset();
       setPreview(null);
       setFileName("");
       router.push("/gallery");
     } catch (err: any) {
-      alert(err?.message || "Upload gagal");
+      alert(err?.message || "Upload failed");
     } finally {
       setLoading(false);
     }
@@ -98,10 +100,8 @@ export default function SubmitPage() {
   // ---- ui -------------------------------------------------------------------
   return (
     <div className="max-w-3xl mx-auto px-5 sm:px-6 py-10">
-      {/* Nav kecil di atas form */}
       <div className="flex gap-3 mb-6">
         <a href="/" className="btn">⬅ Back to Home</a>
-        {/* samakan warna tombol dengan back home */}
         <a href="/gallery" className="btn">View Gallery</a>
       </div>
 
@@ -151,9 +151,9 @@ export default function SubmitPage() {
             className="hidden"
           />
           <div className="dropzone__hint">
-            {fileName ? `Selected: ${fileName}` : "Drag & drop image here, atau klik untuk memilih"}
+            {fileName ? `Selected: ${fileName}` : "Drag & drop image here, or click to choose"}
           </div>
-          <div className="dropzone__sub">Format: PNG / JPG / WEBP — Maks 8MB</div>
+          <div className="dropzone__sub">Format: PNG / JPG / WEBP — Max 8MB</div>
         </label>
 
         {preview && (
