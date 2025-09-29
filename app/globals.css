@@ -1,0 +1,100 @@
+/* Tailwind v4 */
+@import "tailwindcss";
+
+/* Base */
+html, body, :root { height: 100%; }
+body {
+  min-height: 100vh;
+  background: #000;
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Text Gradient */
+.text-gradient {
+  background: linear-gradient(135deg, #8A7CFF 0%, #19C3FF 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Animations */
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-14px)} }
+.animate-float { animation: float 4s ease-in-out infinite; }
+
+@keyframes glow {
+  0%,100% { filter: drop-shadow(0 0 8px #8A7CFF) drop-shadow(0 0 15px #19C3FF); }
+  50% { filter: drop-shadow(0 0 20px #19C3FF) drop-shadow(0 0 40px #8A7CFF); }
+}
+.animate-glow { animation: glow 3s ease-in-out infinite; }
+
+/* Components */
+@layer components {
+  .btn,
+  button,
+  input[type="submit"],
+  input[type="button"] {
+    @apply px-4 py-2 rounded-full text-sm font-semibold transition ring-1 ring-white/10;
+    background: linear-gradient(135deg, #8A7CFF 0%, #19C3FF 100%);
+    box-shadow: 0 0 20px rgba(138,124,255,.35);
+    color: #fff !important;
+  }
+  .btn:hover,
+  button:hover { filter: brightness(1.05); }
+
+  .btn-ghost {
+    @apply px-4 py-2 rounded-full text-sm font-medium transition ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white;
+  }
+
+  .glass { @apply bg-white/5 backdrop-blur-md ring-1 ring-white/10; }
+  .card-hover { @apply transition-shadow duration-300; }
+  .card-hover:hover { box-shadow: 0 10px 40px rgba(138,124,255,.25); }
+
+  /* Dropzone upload */
+  .dropzone {
+    border: 2px dashed rgba(255,255,255,0.3);
+    border-radius: 1rem;
+    padding: 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.3s ease;
+  }
+  .dropzone:hover {
+    border-color: #19C3FF;
+  }
+}
+
+/* Input agar kontras */
+input[type="text"], input[type="search"] {
+  @apply bg-white/10 text-white placeholder-white/60 rounded-full;
+}
+
+/* ==== Drag & Drop states ==== */
+.dropzone {
+  position: relative;
+  border: 2px dashed rgba(255,255,255,0.3);
+  border-radius: 1rem;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .25s ease, background-color .25s ease, box-shadow .25s ease;
+}
+.dropzone:hover { border-color: #19C3FF; }
+
+.dropzone--active {
+  border-color: #19C3FF;
+  background: radial-gradient(ellipse at center, rgba(25,195,255,.12), rgba(138,124,255,.08) 40%, transparent 70%);
+  box-shadow: 0 0 30px rgba(25,195,255,.25);
+}
+
+.dropzone__hint {
+  color: rgba(255,255,255,.75);
+  font-size: .95rem;
+}
+.dropzone__sub {
+  color: rgba(255,255,255,.55);
+  font-size: .8rem;
+  margin-top: .35rem;
+}
+
