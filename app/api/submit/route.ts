@@ -1,8 +1,9 @@
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
-import path from "path";
 import fs from "fs/promises";
-import crypto from "crypto";
-import { put } from "@vercel/blob";
+import path from "path";
 
 export const runtime = "nodejs";
 
