@@ -1,24 +1,25 @@
-// components/Footer.tsx
 "use client";
+import { useState } from "react";
 
 export default function Footer() {
-  // alamat asli
-  const addr = "0x00B8Dfd0c24173D67eff903C57875559332b2379";
+  const address = "0x00B8Dfd0c24173D67eff903C57875559332b2379";
+  const short = `${address.slice(0, 6)}…${address.slice(-4)}`;
+
+  const [copied, setCopied] = useState(false);
 
   async function copyAddr() {
     try {
-      await navigator.clipboard.writeText(addr);
-      alert("Address copied: " + addr);
-    } catch {
-      alert("Failed to copy address");
-    }
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
   }
 
   return (
-    <footer className="h-20 w-full bg-[#0B0D17]/95 border-t border-white/10">
-      <div className="max-w-6xl mx-auto h-full px-5 sm:px-6 flex items-center justify-between">
+    <footer className="w-full bg-[#0B0D17]/95 border-t border-white/10">
+      <div className="max-w-6xl mx-auto px-5 sm:px-6 py-3 grid grid-cols-3 items-center">
         
-        {/* Left text */}
+        {/* left */}
         <p className="text-xs sm:text-sm text-white/70">
           Built by{" "}
           <a
@@ -32,25 +33,32 @@ export default function Footer() {
           . © 2025 Fairblock Community.
         </p>
 
-        {/* Center Tip Me */}
-        <div className="footer-tip mx-auto">
-          <img src="/qr-tip.png" alt="Tip QR" />
-          <div className="flex flex-col">
-            <button onClick={copyAddr} className="btn-ghost text-xs px-3 py-1">
+        {/* center → TipMe */}
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-2 bg-white/5 rounded-xl px-3 py-1 ring-1 ring-white/10">
+            <img
+              src="/qr-tip.png"
+              alt="Tip QR"
+              className="h-8 w-8 rounded-md object-contain ring-1 ring-white/15"
+            />
+            <button
+              onClick={copyAddr}
+              className="btn text-xs px-3 py-1"
+            >
               💜 Tip Me
             </button>
-            <span
-              className="addr cursor-pointer"
-              onClick={copyAddr}
-              title={addr}
-            >
-              {addr.slice(0, 6)}...{addr.slice(-4)}
-            </span>
           </div>
+          <button
+            onClick={copyAddr}
+            className="text-[10px] text-white/60 hover:text-white/80"
+            title="Copy address"
+          >
+            {copied ? "Copied!" : short}
+          </button>
         </div>
 
-        {/* Right links */}
-        <div className="hidden sm:flex items-center gap-5 text-xs sm:text-sm">
+        {/* right */}
+        <div className="flex justify-end items-center gap-5 text-xs sm:text-sm">
           <a
             href="https://x.com/0xfairblock"
             target="_blank"
