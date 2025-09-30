@@ -6,23 +6,24 @@ import Link from "next/link";
 type Item = {
   id: string;
   title: string;
-  x?: string;        // "@kanjuro" atau "kanjuro"
-  discord?: string;  // user id (digit), URL, atau handle (name#1234 / nama)
+  x?: string;        // "@kanjuro" or "kanjuro"
+  discord?: string;  // user id (digits), URL, or handle
   url: string;
   createdAt: string;
 };
 
-// Penyimpanan lokal: versi baru dan versi lama (kompatibilitas)
-type TokenEntry = { token: string; metaUrl: string };
-type TokenMapNew = Record<string, TokenEntry>;
-type TokenMapAny = Record<string, TokenEntry | string>;
+type TokenRec = {
+  metaUrl?: string;        // required for new Blob-delete flow
+  ownerTokenHash?: string; // optional, returned by server
+  token?: string;          // legacy deleteToken (fallback)
+};
 
 export default function GalleryPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"new" | "old">("new");
   const [onlyMine, setOnlyMine] = useState(false);
-  const [myTokens, setMyTokens] = useState<TokenMapAny>({});
+  const [myTokens, setMyTokens] = useState<Record<string, TokenRec>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,11 +40,7 @@ export default function GalleryPage() {
 
   const filtered = useMemo(() => {
     let list = [...items];
-
-    if (onlyMine) {
-      list = list.filter((it) => Boolean(myTokens[it.id]));
-    }
-
+    if (onlyMine) list = list.filter((it) => Boolean(myTokens[it.id]));
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter(
@@ -53,65 +50,47 @@ export default function GalleryPage() {
           (it.discord && it.discord.toLowerCase().includes(q))
       );
     }
-
     list.sort((a, b) =>
       sort === "new"
         ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     );
-
     return list;
   }, [items, query, sort, onlyMine, myTokens]);
 
   async function handleDelete(id: string) {
-    const entry = myTokens[id];
+    const rec = myTokens[id];
+    if (!rec) return alert("You don't have permission to delete this item (no local token).");
 
-    if (!entry) {
-      alert("You don't have access to delete this item.");
+    // New flow requires metaUrl; warn if missing
+    if (!rec.metaUrl) {
+      alert(
+        "Missing metaUrl for this item. If this artwork was uploaded before the Blob migration or from a different browser, you may need to re-upload from this browser."
+      );
       return;
     }
 
-    const isLegacy = typeof entry === "string";
     if (!confirm("Delete this artwork?")) return;
 
     setLoadingId(id);
     try {
-      if (isLegacy) {
-        // ===== Fallback skema lama (hanya token, tanpa metaUrl) =====
-        const token = entry as string;
-        const res = await fetch(`/api/gallery/${id}`, {
-          method: "DELETE",
-          headers: { "x-delete-token": token },
-        });
-        const data = await res.json();
-        if (!data?.success) throw new Error(data?.error || "Delete failed");
-      } else {
-        // ===== Skema baru berbasis Blob metadata =====
-        const { token, metaUrl } = entry as TokenEntry;
-        if (!metaUrl) {
-          alert("Missing metaUrl");
-          return;
-        }
-        const res = await fetch(`/api/art/${id}`, {
-          method: "DELETE",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            ownerTokenHash: token,
-            metaUrl,
-          }),
-        });
-        const data = await res.json();
-        if (!data?.success && !data?.ok) {
-          throw new Error(data?.error || "Delete failed");
-        }
-      }
+      const res = await fetch(`/api/art/${id}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          metaUrl: rec.metaUrl,
+          ownerTokenHash: rec.ownerTokenHash,
+          token: rec.token, // optional fallback
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Delete failed");
 
-      // Hapus dari UI + localStorage
       setItems((prev) => prev.filter((it) => it.id !== id));
-      const next: TokenMapAny = { ...myTokens };
-      delete next[id];
-      localStorage.setItem("fairblock_tokens", JSON.stringify(next));
-      setMyTokens(next);
+      const copy = { ...myTokens };
+      delete copy[id];
+      localStorage.setItem("fairblock_tokens", JSON.stringify(copy));
+      setMyTokens(copy);
     } catch (e: any) {
       alert(e?.message || "Delete failed");
     } finally {
@@ -125,18 +104,18 @@ export default function GalleryPage() {
     setQuery(clean.startsWith("@") ? clean.toLowerCase() : `@${clean.toLowerCase()}`);
   }
 
-  // ===== Helper link Discord =====
+  // ===== Discord link helper =====
   function discordLink(discord?: string): string | undefined {
     if (!discord) return;
     const v = discord.trim();
 
-    // Jika URL langsung
+    // Direct URL
     if (/^https?:\/\//i.test(v)) return v;
 
-    // Jika ID pengguna (17-20 digit)
+    // Numeric User ID (17-20 digits)
     if (/^\d{17,20}$/.test(v)) return `https://discord.com/users/${v}`;
 
-    // Selain itu (handle/username), tidak ada URL resmi — return undefined
+    // Otherwise (handle/username)—no official profile URL
     return undefined;
   }
 
@@ -144,7 +123,7 @@ export default function GalleryPage() {
     try {
       await navigator.clipboard.writeText(h);
       alert(
-        "Discord handle copied.\n\nNote: A direct profile link only works if you provide your Discord User ID (Settings → Advanced → Developer Mode → Copy ID)."
+        "Discord handle copied.\n\nTip: a direct profile link only works if you provide a numeric User ID (Settings → Advanced → Developer Mode → Copy ID)."
       );
     } catch {
       alert("Failed to copy handle.");
@@ -169,7 +148,7 @@ export default function GalleryPage() {
             className="px-4 py-2 rounded-full"
           />
 
-          {/* Select ikut gradient dengan class .btn */}
+          {/* Select styled like .btn for consistency */}
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as "new" | "old")}
@@ -213,8 +192,7 @@ export default function GalleryPage() {
       ) : (
         <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
           {filtered.map((it) => {
-            const entry = myTokens[it.id];
-            const canDelete = Boolean(entry);
+            const canDelete = Boolean(myTokens[it.id]);
             const xHandle = it.x ? it.x.replace(/^@/, "") : "";
             const dHref = discordLink(it.discord);
 
@@ -223,15 +201,15 @@ export default function GalleryPage() {
                 <img
                   src={it.url}
                   alt={it.title}
-                  className="w-full h-56 object-cover rounded-xl"
+                  className="w-full h-56 object-contain rounded-xl bg-white/5"
                 />
 
                 <div className="mt-3">
                   <h3 className="font-semibold">{it.title}</h3>
 
-                  {/* chips / tindakan */}
+                  {/* chips / actions */}
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {/* X: chip filter + link profil */}
+                    {/* X: filter chip + profile link */}
                     {it.x && (
                       <>
                         <button
@@ -253,7 +231,7 @@ export default function GalleryPage() {
                       </>
                     )}
 
-                    {/* Discord: jika bisa link → buka; jika tidak → copy handle */}
+                    {/* Discord: open if URL/ID, else copy handle */}
                     {it.discord && (
                       <>
                         <button

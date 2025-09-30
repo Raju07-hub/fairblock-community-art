@@ -1,15 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
-type SubmitResp = {
-  success: boolean;
-  id: string;
-  url: string;
-  deleteToken: string;
-  metaUrl: string;
+type TokenRec = {
+  metaUrl?: string;        // lokasi metadata di Blob (wajib untuk delete model baru)
+  ownerTokenHash?: string; // hash token dari server (aman untuk disimpan)
+  token?: string;          // fallback: deleteToken lama (kalau masih ada)
 };
 
 export default function SubmitPage() {
@@ -21,7 +18,7 @@ export default function SubmitPage() {
   const [fileName, setFileName] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
-  // ---------- helpers ----------
+  // ---- helpers --------------------------------------------------------------
   function validateAndPreview(f?: File) {
     if (!f) return;
     const okTypes = ["image/png", "image/jpeg", "image/webp"];
@@ -48,7 +45,6 @@ export default function SubmitPage() {
     setIsDragging(false);
     const f = e.dataTransfer.files?.[0];
     if (f) {
-      // put dropped file into the hidden input so it’s submitted
       if (fileInputRef.current) {
         const dt = new DataTransfer();
         dt.items.add(f);
@@ -69,7 +65,7 @@ export default function SubmitPage() {
     setIsDragging(false);
   }
 
-  // ---------- submit ----------
+  // ---- submit ---------------------------------------------------------------
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -80,47 +76,50 @@ export default function SubmitPage() {
       const res = await fetch("/api/submit", { method: "POST", body: fd });
 
       const text = await res.text();
-      let data: SubmitResp;
+      let data: any;
       try {
-        data = JSON.parse(text) as SubmitResp;
+        data = JSON.parse(text);
       } catch {
         throw new Error(text || "Non-JSON response");
       }
-      if (!res.ok || !data?.success) {
-        throw new Error(("error" in (data as any) ? (data as any).error : "") || "Upload failed");
-      }
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Upload failed");
 
-      // Save owner delete token & meta url locally (client-side only)
+      // Save delete credentials locally (for delete button)
       try {
-        type TokenMap = Record<string, { token: string; metaUrl: string }>;
         const raw = localStorage.getItem("fairblock_tokens");
-        const map: TokenMap = raw ? JSON.parse(raw) : {};
-        map[data.id] = { token: data.deleteToken, metaUrl: data.metaUrl };
+        const map: Record<string, TokenRec> = raw ? JSON.parse(raw) : {};
+
+        // Support both models:
+        //  - New (Blob): metaUrl + ownerTokenHash
+        //  - Legacy: deleteToken only
+        map[data.id] = {
+          metaUrl: data.metaUrl,
+          ownerTokenHash: data.ownerTokenHash,
+          token: data.deleteToken,
+        };
+
         localStorage.setItem("fairblock_tokens", JSON.stringify(map));
-      } catch {
-        // ignore storage errors
-      }
+      } catch {}
 
       alert("Upload successful!");
       form.reset();
       setPreview(null);
       setFileName("");
       router.push("/gallery");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
-      alert(msg);
+    } catch (err: any) {
+      alert(err?.message || "Upload failed");
     } finally {
       setLoading(false);
     }
   }
 
-  // ---------- UI ----------
+  // ---- ui -------------------------------------------------------------------
   return (
     <div className="max-w-3xl mx-auto px-5 sm:px-6 py-10">
-      {/* Top nav actions (single Back button here; not duplicated below) */}
+      {/* Top nav */}
       <div className="flex gap-3 mb-6">
-        <Link href="/" className="btn">⬅ Back to Home</Link>
-        <Link href="/gallery" className="btn">View Gallery</Link>
+        <a href="/" className="btn">⬅ Back to Home</a>
+        <a href="/gallery" className="btn">View Gallery</a>
       </div>
 
       <h1 className="text-3xl font-bold text-gradient mb-6">Submit Your Art</h1>
@@ -141,12 +140,12 @@ export default function SubmitPage() {
           />
           <input
             name="discord"
-            placeholder="Username Discord — e.g. name#1234"
+            placeholder="Username Discord — e.g. name#1234 or user ID"
             className="w-full px-4 py-3 rounded-xl bg-white/10 placeholder-white/60 focus:outline-none"
           />
         </div>
 
-        {/* Dropzone */}
+        {/* DROPZONE */}
         <label
           className={`dropzone ${isDragging ? "dropzone--active" : ""} block`}
           onDragOver={onDragOver}
@@ -179,7 +178,7 @@ export default function SubmitPage() {
             <img
               src={preview}
               alt="preview"
-              className="w-80 h-80 object-cover rounded-2xl animate-float animate-glow"
+              className="w-80 h-80 object-contain rounded-2xl bg-white/5"
             />
           </div>
         )}
