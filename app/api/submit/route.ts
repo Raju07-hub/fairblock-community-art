@@ -74,3 +74,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: err?.message || "Upload failed" }, { status: 500 });
   }
 }
+
+// const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+// map[data.id] = data.deleteToken;
+
+type TokenMap = Record<string, { token: string; metaUrl: string }>;
+const raw = localStorage.getItem("fairblock_tokens");
+const map: TokenMap = raw ? JSON.parse(raw) : {};
+map[data.id] = { token: data.deleteToken, metaUrl: data.metaUrl };
+localStorage.setItem("fairblock_tokens", JSON.stringify(map));
