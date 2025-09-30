@@ -2,93 +2,63 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { list } from "@vercel/blob";
 
-type PublicMeta = {
-  id: string;
-  title: string;
-  x?: string;
-  discord?: string;
-  url: string;
-  createdAt: string;
-};
-
-type ApiItem = PublicMeta;
-
-function parseBool(v: string | null, d = false) {
-  if (v == null) return d;
-  return ["1", "true", "yes", "on"].includes(v.toLowerCase());
-}
-
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json(
-        { success: false, error: "Missing BLOB_READ_WRITE_TOKEN" },
-        { status: 500 }
-      );
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    if (!token) {
+      return NextResponse.json({ success: false, error: "Missing BLOB_READ_WRITE_TOKEN on server." }, { status: 500 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const q = (searchParams.get("q") || "").trim().toLowerCase();
-    const sort = (searchParams.get("sort") || "newest").toLowerCase(); // "newest" | "oldest"
-    const limit = Math.max(1, Math.min(100, Number(searchParams.get("limit") || "32")));
-    const cursor = searchParams.get("cursor"); // for pagination
-    // optional flag if you ever need it:
-    const _noStore = parseBool(searchParams.get("noStore"), true);
+    // List meta files
+    const metas: Array<{
+      id: string;
+      title: string;
+      x?: string;
+      discord?: string;
+      url: string;       // imageUrl
+      createdAt: string;
+    }> = [];
 
-    const { list } = await import("@vercel/blob");
-    // Ambil daftar file meta (public) di prefix gallery/meta/
-    const listed = await list({
-      prefix: "gallery/meta/",
-      token: process.env.BLOB_READ_WRITE_TOKEN,
-      limit,
-      cursor: cursor || undefined,
-    });
-
-    // Ambil isi meta JSON satu-satu (public fetch)
-    const metas = await Promise.all(
-      listed.blobs
-        .filter((b) => b.pathname.endsWith(".json"))
-        .map(async (b) => {
-          const res = await fetch(b.url, { cache: "no-store" });
-          if (!res.ok) return null;
-          const meta = (await res.json()) as PublicMeta;
-          return meta;
-        })
-    );
-
-    let items: ApiItem[] = metas.filter(Boolean) as ApiItem[];
-
-    // Search filter sederhana (title / x / discord)
-    if (q) {
-      items = items.filter((it) => {
-        const hay = `${it.title || ""} ${it.x || ""} ${it.discord || ""}`.toLowerCase();
-        return hay.includes(q);
+    // list() may paginate; loop until done
+    let cursor: string | undefined = undefined;
+    do {
+      const { blobs, cursor: next } = await list({
+        prefix: "fairblock/meta/",
+        token,
+        cursor,
       });
-    }
+      cursor = next;
 
-    // Sort
-    items.sort((a, b) => {
-      const ta = Date.parse(a.createdAt || "");
-      const tb = Date.parse(b.createdAt || "");
-      return sort === "oldest" ? ta - tb : tb - ta; // default newest
-    });
+      // fetch each meta json
+      for (const b of blobs) {
+        try {
+          const r = await fetch(b.url, { cache: "no-store" });
+          if (!r.ok) continue;
+          const m = await r.json();
 
-    return NextResponse.json({
-      success: true,
-      items,
-      nextCursor: listed.cursor || null,
-      // info tambahan (optional)
-      count: items.length,
-    }, {
-      // supaya tidak di-cache edge secara agresif
-      headers: _noStore ? { "cache-control": "no-store" } : undefined,
-    });
+          // map to gallery item shape
+          metas.push({
+            id: m.id,
+            title: m.title,
+            x: m.x,
+            discord: m.discord,
+            url: m.imageUrl,
+            createdAt: m.createdAt,
+          });
+        } catch {
+          // skip broken meta
+        }
+      }
+    } while (cursor);
+
+    // newest first
+    metas.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+    return NextResponse.json({ success: true, items: metas });
   } catch (e: any) {
-    return NextResponse.json(
-      { success: false, error: e?.message || "List failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: e?.message || "Failed to load gallery" }, { status: 500 });
   }
 }
