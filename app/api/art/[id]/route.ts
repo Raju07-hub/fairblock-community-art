@@ -1,49 +1,67 @@
+// app/api/art/[id]/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { del } from "@vercel/blob";
 import { createHash } from "crypto";
 
-type In = { metaUrl?: string; deleteToken?: string; ownerTokenHash?: string };
-
-export async function DELETE(req: Request, _ctx: { params: Promise<{ id: string }> }) {
+/**
+ * DELETE /api/art/:id
+ * Body JSON: { token: string, metaUrl: string }
+ * - token   : delete token yang kamu simpan di localStorage saat submit
+ * - metaUrl : URL JSON meta yang disimpan di Blob saat upload
+ *
+ * Server akan:
+ * 1) Fetch metaUrl
+ * 2) Bandingkan sha256(token) dengan meta.ownerTokenHash
+ * 3) Jika cocok, hapus file gambar (meta.imageUrl) dan file meta (metaUrl)
+ */
+export async function DELETE(
+  req: NextRequest,
+  _ctx: { params: Promise<{ id: string }> } // Next.js 15: params adalah Promise (tidak dipakai di sini)
+) {
   try {
-    const { metaUrl, deleteToken, ownerTokenHash }: In = await req.json().catch(() => ({}));
-    if (!metaUrl) return NextResponse.json({ error: "Missing metaUrl" }, { status: 400 });
-
-    // Ambil metadata
-    const metaRes = await fetch(metaUrl, { cache: "no-store" });
-    if (!metaRes.ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const meta = await metaRes.json();
-
-    // Otorisasi:
-    // 1) Admin (optional)
-    const adminHeader = (req.headers.get("x-admin-key") || "").trim();
-    const isAdmin = !!process.env.ADMIN_KEY && adminHeader === process.env.ADMIN_KEY;
-
-    // 2) Pemilik: cocokkan hash(deleteToken) dengan ownerTokenHash di meta
-    let isOwner = false;
-    if (deleteToken) {
-      const hash = createHash("sha256").update(deleteToken).digest("hex");
-      isOwner = hash === meta.ownerTokenHash;
+    const { token, metaUrl } = await req.json().catch(() => ({}));
+    if (!token || !metaUrl) {
+      return NextResponse.json(
+        { error: "Missing token or metaUrl" },
+        { status: 400 }
+      );
     }
-    // (opsional) dukung variabel ownerTokenHash langsung
-    if (ownerTokenHash && ownerTokenHash === meta.ownerTokenHash) isOwner = true;
 
-    if (!isAdmin && !isOwner) {
+    // Ambil meta dari Blob
+    const metaRes = await fetch(metaUrl, { cache: "no-store" });
+    if (!metaRes.ok) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    const meta: any = await metaRes.json();
+
+    // Verifikasi kepemilikan: sha256(token) === meta.ownerTokenHash
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    if (meta.ownerTokenHash !== tokenHash) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Hapus image & meta
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json({ error: "Missing blob token" }, { status: 500 });
+    // Hapus file gambar + file meta dari Blob
+    const RW = process.env.BLOB_READ_WRITE_TOKEN;
+    if (!RW) {
+      return NextResponse.json(
+        { error: "Server misconfigured: missing BLOB_READ_WRITE_TOKEN" },
+        { status: 500 }
+      );
     }
-    if (meta.imageUrl) await del(meta.imageUrl, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch(() => {});
-    await del(metaUrl, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch(() => {});
 
-    return NextResponse.json({ ok: true });
+    const tasks: Promise<any>[] = [];
+    if (meta.imageUrl) tasks.push(del(meta.imageUrl, { token: RW }));
+    tasks.push(del(metaUrl, { token: RW }));
+    await Promise.allSettled(tasks);
+
+    return NextResponse.json({ success: true });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || "Delete failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message || "Delete failed" },
+      { status: 500 }
+    );
   }
 }
