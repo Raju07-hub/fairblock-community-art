@@ -1,64 +1,39 @@
-// app/api/gallery/[id]/route.ts
+// app/api/art/[id]/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
-export async function DELETE(
-  req: NextRequest,
-  ctx: { params: Promise<{ id: string }> }
-) {
+type DelFn = (urlOrKey: string, opts: any) => Promise<void>;
+
+export async function DELETE(req: Request, _ctx: { params: Promise<{id:string}> }) {
   try {
-    const { id } = await ctx.params;
-
-    // token dari header
-    const bearer = req.headers.get("authorization") || "";
-    const tokenHeader =
-      req.headers.get("x-delete-token") ||
-      (bearer.startsWith("Bearer ") ? bearer.slice(7) : "");
-
-    // admin override (opsional)
-    const adminHeader = req.headers.get("x-admin-key") || "";
-    const isAdmin =
-      !!process.env.ADMIN_KEY && adminHeader === process.env.ADMIN_KEY;
-
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json({ success:false, error:"Missing BLOB_READ_WRITE_TOKEN" }, { status:500 });
+    const { ownerTokenHash, metaUrl } = await req.json().catch(() => ({}));
+    if (!ownerTokenHash || !metaUrl) {
+      return NextResponse.json({ error: "Missing ownerTokenHash or metaUrl" }, { status: 400 });
     }
 
-    // body harus berisi metaUrl
-    const { metaUrl } = await req.json().catch(() => ({}));
-    if (!metaUrl) {
-      return NextResponse.json({ success:false, error:"Missing metaUrl" }, { status:400 });
-    }
-
-    // fetch meta (PUBLIC), verifikasi id
+    // baca metadata
     const metaRes = await fetch(metaUrl, { cache: "no-store" });
-    if (!metaRes.ok) {
-      return NextResponse.json({ success:false, error:"Not found" }, { status:404 });
-    }
+    if (!metaRes.ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const meta = await metaRes.json();
-    if (meta?.id !== id) {
-      return NextResponse.json({ success:false, error:"ID mismatch" }, { status:400 });
+
+    // cek hash
+    if (meta.ownerTokenHash !== ownerTokenHash) {
+      // allow admin override via header
+      const adminKey = req.headers.get("x-admin-key");
+      if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
     }
 
-    // validasi owner (sederhana): token harus ada.
-    // (opsional lebih kuat: simpan ownerTokenHash di meta & cocokkan hash(tokenHeader))
-    const isOwner = !!tokenHeader;
+    // hapus file
+    const { del } = await import("@vercel/blob") as { del: DelFn };
+    await del(meta.url, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch(()=>{});
+    await del(metaUrl,  { token: process.env.BLOB_READ_WRITE_TOKEN }).catch(()=>{});
 
-    if (!isAdmin && !isOwner) {
-      return NextResponse.json({ success:false, error:"Unauthorized" }, { status:403 });
-    }
-
-    // hapus gambar & meta di Blob
-    const { del } = await import("@vercel/blob");
-    await Promise.allSettled([
-      del(meta.url, { token: process.env.BLOB_READ_WRITE_TOKEN }),
-      del(metaUrl,  { token: process.env.BLOB_READ_WRITE_TOKEN }),
-    ]);
-
-    return NextResponse.json({ success:true, by: isAdmin ? "admin" : "owner" });
-  } catch (e: any) {
-    return NextResponse.json({ success:false, error: e?.message || "Delete failed" }, { status:500 });
+    return NextResponse.json({ ok: true });
+  } catch (e:any) {
+    return NextResponse.json({ error: e?.message || "Delete failed" }, { status: 500 });
   }
 }

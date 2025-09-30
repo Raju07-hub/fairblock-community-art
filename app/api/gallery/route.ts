@@ -1,58 +1,49 @@
+// app/api/gallery/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { list } from "@vercel/blob";
 
-type GalleryItem = {
-  id: string;
-  title: string;
-  x?: string;
-  discord?: string;
-  url: string;        // image url
-  createdAt: string;
-  metaUrl: string;    // <- penting untuk delete
-};
+type ListFn = (opts: any) => Promise<{ blobs: Array<{ url: string; pathname?: string; key?: string }>; cursor?: string|null }>;
 
 export async function GET() {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json({ success: true, items: [], nextCursor: null, count: 0 });
+      return NextResponse.json({ success:true, items:[], nextCursor:null, count:0 });
     }
 
-    // Ambil semua file meta
-    const metas = await list({
+    const { list } = await import("@vercel/blob") as { list: ListFn };
+
+    // ambil maksimal 100 metadata terbaru
+    const { blobs } = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
       prefix: "fairblock/meta/",
-      limit: 1000,
+      limit: 100,
     });
 
-    const items: GalleryItem[] = [];
-    for (const f of metas.blobs) {
-      try {
-        const metaUrl = f.url;
-        const r = await fetch(metaUrl, { cache: "no-store" });
-        if (!r.ok) continue;
-        const m = await r.json();
-        // validasi minimum
-        if (!m?.id || !m?.imageUrl || !m?.title) continue;
-        items.push({
-          id: m.id,
-          title: m.title,
-          x: m.x,
-          discord: m.discord,
-          url: m.imageUrl,
-          createdAt: m.createdAt || new Date().toISOString(),
-          metaUrl, // ← dipakai tombol Delete
-        });
-      } catch {}
-    }
+    const items = await Promise.all(
+      blobs.map(async (b) => {
+        const res = await fetch(b.url, { cache: "no-store" });
+        if (!res.ok) return null;
+        const meta = await res.json();
+        return {
+          id: meta.id,
+          title: meta.title,
+          x: meta.x,
+          discord: meta.discord,
+          url: meta.url,
+          createdAt: meta.createdAt,
+          metaUrl: b.url,
+        };
+      })
+    );
 
-    // urutkan terbaru
-    items.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    const filtered = items.filter(Boolean) as any[];
+    // newest first
+    filtered.sort((a,b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 
-    return NextResponse.json({ success: true, items, nextCursor: null, count: items.length });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e?.message }, { status: 500 });
+    return NextResponse.json({ success:true, items: filtered, nextCursor: null, count: filtered.length });
+  } catch (e:any) {
+    return NextResponse.json({ success:false, error: e?.message }, { status:500 });
   }
 }
