@@ -166,10 +166,8 @@ export default function SubmitPage() {
           </div>
         )}
 
+        {/* BAWAH: hanya tombol Submit (Back Home sudah di atas) */}
         <div className="flex gap-3 pt-2">
-          <button type="button" onClick={() => (location.href = "/")} className="btn">
-            ⬅ Back to Home
-          </button>
           <button type="submit" disabled={loading} className="btn">
             {loading ? "Submitting..." : "Submit"}
           </button>
