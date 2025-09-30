@@ -10,16 +10,16 @@ type Item = {
   discord?: string;
   url: string;
   createdAt: string;
-  metaUrl?: string; // required for delete (owner/admin)
+  metaUrl?: string; // returned by /api/gallery (Blob metadata URL)
 };
 
 type TokenRec = {
-  metaUrl?: string;
-  ownerTokenHash?: string;
-  token?: string; // legacy deleteToken fallback
+  token?: string;        // legacy deleteToken (owner-side)
+  metaUrl?: string;      // stored at submit time (new flow)
+  ownerTokenHash?: string; // informational; not used client-side
 };
 
-const PUBLIC_ADMIN_UI = process.env.NEXT_PUBLIC_ADMIN_UI === "true";
+const ADMIN_UI = process.env.NEXT_PUBLIC_ADMIN_UI === "true";
 
 export default function GalleryPage() {
   const [items, setItems] = useState<Item[]>([]);
@@ -28,43 +28,37 @@ export default function GalleryPage() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [myTokens, setMyTokens] = useState<Record<string, TokenRec>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
-
-  // Admin UI (optional)
   const [adminMode, setAdminMode] = useState(false);
-  const [adminKey, setAdminKey] = useState<string>("");
 
-  // Load data
+  // ------- load gallery + my tokens -------
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/gallery", { cache: "no-store" });
       const data = await res.json();
-      setItems((data.items || []) as Item[]);
+      setItems(Array.isArray(data.items) ? data.items : []);
     })();
-
     try {
       const raw = localStorage.getItem("fairblock_tokens");
       setMyTokens(raw ? JSON.parse(raw) : {});
     } catch {}
-
-    if (PUBLIC_ADMIN_UI) {
-      setAdminKey(sessionStorage.getItem("fairblock_admin_key") || "");
+    if (ADMIN_UI) {
       setAdminMode(sessionStorage.getItem("fairblock_admin_mode") === "1");
     }
   }, []);
 
-  // Derived list
+  // ------- filtering / sorting -------
   const filtered = useMemo(() => {
     let list = [...items];
 
     if (onlyMine) {
-      list = list.filter((it) => Boolean(myTokens[it.id]));
+      list = list.filter((it) => Boolean(myTokens[it.id]?.token));
     }
 
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter(
         (it) =>
-          it.title.toLowerCase().includes(q) ||
+          it.title?.toLowerCase().includes(q) ||
           (it.x && it.x.toLowerCase().includes(q)) ||
           (it.discord && it.discord.toLowerCase().includes(q))
       );
@@ -79,96 +73,62 @@ export default function GalleryPage() {
     return list;
   }, [items, query, sort, onlyMine, myTokens]);
 
-  // Helpers
+  // ------- utils -------
+  function filterByUsernameX(handle: string) {
+    if (!handle) return;
+    const clean = handle.startsWith("@") ? handle : `@${handle}`;
+    setQuery(clean.toLowerCase());
+  }
+
   function discordLink(discord?: string): string | undefined {
     if (!discord) return;
     const v = discord.trim();
-    if (/^https?:\/\//i.test(v)) return v;
-    if (/^\d{17,20}$/.test(v)) return `https://discord.com/users/${v}`;
-    return undefined;
+    if (/^https?:\/\//i.test(v)) return v; // already a URL
+    if (/^\d{17,20}$/.test(v)) return `https://discord.com/users/${v}`; // user ID
+    return undefined; // regular handle (no direct profile URL)
   }
 
-  async function copyDiscordHandle(h: string) {
+  async function copyText(t: string) {
     try {
-      await navigator.clipboard.writeText(h);
-      alert(
-        "Discord handle copied.\n\nTip: Direct profile link works only if you provide the numeric User ID (enable Developer Mode in Discord then copy ID)."
-      );
+      await navigator.clipboard.writeText(t);
+      alert("Copied to clipboard.");
     } catch {
-      alert("Failed to copy handle.");
+      alert("Copy failed.");
     }
   }
 
-  function filterByUsername(name: string) {
-    const clean = name.trim();
-    if (!clean) return;
-    setQuery(clean.startsWith("@") ? clean.toLowerCase() : `@${clean.toLowerCase()}`);
-  }
+  // ------- Delete (Owner or Admin) -------
+  async function handleDeleteOwner(it: Item) {
+    const rec = myTokens[it.id];
+    const token = rec?.token;
+    const metaUrl = it.metaUrl || rec?.metaUrl; // prefer metaUrl from API
 
-  // Admin toggle (prompt once)
-  function toggleAdminMode(next: boolean) {
-    if (!PUBLIC_ADMIN_UI) return;
-    if (next && !adminKey) {
-      const k = window.prompt("Enter ADMIN_KEY to enable Admin Mode:");
-      if (!k) return;
-      setAdminKey(k);
-      sessionStorage.setItem("fairblock_admin_key", k);
+    if (!token || !metaUrl) {
+      alert("Missing token or metaUrl");
+      return;
     }
-    setAdminMode(next);
-    sessionStorage.setItem("fairblock_admin_mode", next ? "1" : "0");
-  }
+    if (!confirm("Delete this artwork?")) return;
 
-  // DELETE (owner/admin)
-  async function handleDelete(id: string, asAdmin = false) {
-    const tokenRec = myTokens[id]; // { metaUrl, token, ownerTokenHash }
-    const metaUrl = tokenRec?.metaUrl || items.find((it) => it.id === id)?.metaUrl;
-
-    if (!asAdmin) {
-      if (!tokenRec?.token && !metaUrl) {
-        return alert("You don't have permission to delete this item.");
-      }
-      if (!confirm("Delete this artwork?")) return;
-    } else {
-      if (!PUBLIC_ADMIN_UI || !adminMode) return;
-      if (!adminKey) {
-        const k = window.prompt("Enter ADMIN_KEY:");
-        if (!k) return;
-        setAdminKey(k);
-        sessionStorage.setItem("fairblock_admin_key", k);
-      }
-      if (!metaUrl) {
-        return alert("Missing metaUrl (cannot admin-delete).");
-      }
-      if (!confirm("Delete this artwork as ADMIN? This cannot be undone.")) return;
-    }
-
-    setLoadingId(id);
+    setLoadingId(it.id);
     try {
-      const res = await fetch(`/api/art/${id}`, {
+      const res = await fetch(`/api/art/${it.id}`, {
         method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          ...(asAdmin && adminKey ? { "x-admin-key": adminKey } : {}),
-        },
-        body: JSON.stringify({
-          token: tokenRec?.token,      // owner path: may be present (legacy)
-          metaUrl,                     // REQUIRED for both owner/admin
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, metaUrl }),
       });
-
       const data = await res.json();
       if (!data?.success) throw new Error(data?.error || "Delete failed");
 
-      // Remove from UI
-      setItems((prev) => prev.filter((it) => it.id !== id));
+      // remove from UI
+      setItems((prev) => prev.filter((x) => x.id !== it.id));
 
-      // Clean local storage (owner path)
-      if (!asAdmin) {
+      // cleanup local token store
+      try {
         const copy = { ...myTokens };
-        delete copy[id];
+        delete copy[it.id];
         localStorage.setItem("fairblock_tokens", JSON.stringify(copy));
         setMyTokens(copy);
-      }
+      } catch {}
     } catch (e: any) {
       alert(e?.message || "Delete failed");
     } finally {
@@ -176,6 +136,45 @@ export default function GalleryPage() {
     }
   }
 
+  async function handleDeleteAdmin(it: Item) {
+    if (!ADMIN_UI) return;
+
+    const metaUrl = it.metaUrl;
+    if (!metaUrl) {
+      alert("Missing token or metaUrl");
+      return;
+    }
+    // get Admin Key once per session
+    let adminKey = sessionStorage.getItem("fairblock_admin_key") || "";
+    if (!adminKey) {
+      adminKey = prompt("Enter Admin Key:") || "";
+      if (!adminKey) return;
+      sessionStorage.setItem("fairblock_admin_key", adminKey);
+    }
+
+    if (!confirm("Admin: delete this artwork? This cannot be undone.")) return;
+
+    setLoadingId(it.id);
+    try {
+      const res = await fetch(`/api/art/${it.id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-key": adminKey,
+        },
+        body: JSON.stringify({ metaUrl }),
+      });
+      const data = await res.json();
+      if (!data?.success) throw new Error(data?.error || "Delete failed");
+      setItems((prev) => prev.filter((x) => x.id !== it.id));
+    } catch (e: any) {
+      alert(e?.message || "Delete failed");
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  // ------- UI -------
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
       {/* Toolbar */}
@@ -198,6 +197,7 @@ export default function GalleryPage() {
             value={sort}
             onChange={(e) => setSort(e.target.value as "new" | "old")}
             className="btn"
+            title="Sort"
           >
             <option value="new">Newest</option>
             <option value="old">Oldest</option>
@@ -213,22 +213,23 @@ export default function GalleryPage() {
             <span className="text-sm">Only My Uploads</span>
           </label>
 
-          {PUBLIC_ADMIN_UI && (
-            <label className="flex items-center gap-2 bg-white/10 px-3 py-2 rounded-full cursor-pointer select-none">
+          {ADMIN_UI && (
+            <label className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={adminMode}
-                onChange={(e) => toggleAdminMode(e.target.checked)}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setAdminMode(on);
+                  sessionStorage.setItem("fairblock_admin_mode", on ? "1" : "0");
+                }}
                 className="accent-white"
               />
-              <span className="text-sm">
-                Admin Mode
-                {adminMode && <span className="ml-2 text-white/60">••••••••••••••</span>}
-              </span>
+              <span className="text-sm">Admin Mode</span>
             </label>
           )}
 
-          {query && (
+          {!!query && (
             <button onClick={() => setQuery("")} className="btn-ghost px-4 py-2">
               ✕ Clear
             </button>
@@ -239,37 +240,40 @@ export default function GalleryPage() {
       <h1 className="text-3xl font-bold text-gradient mb-2">Gallery</h1>
       <p className="text-white/60 mb-6">
         {filtered.length} result{filtered.length !== 1 ? "s" : ""}
-        {PUBLIC_ADMIN_UI && adminMode && <span className="ml-3">• <b>Admin Mode ON</b></span>}
+        {ADMIN_UI && adminMode && <span className="ml-2">• <b>Admin Mode ON</b></span>}
+        {onlyMine && <span className="ml-2">• showing <b>my uploads</b></span>}
+        {query && <span className="ml-2">for <span className="text-gradient">{query}</span></span>}
       </p>
 
       {filtered.length === 0 ? (
-        <p className="text-white/70">No results found.</p>
+        <p className="text-white/70">No results.</p>
       ) : (
-        <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+        <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
           {filtered.map((it) => {
-            const canDelete = Boolean(myTokens[it.id]);
+            const rec = myTokens[it.id];
+            const canOwnerDelete = Boolean(rec?.token); // uploader only
             const xHandle = it.x ? it.x.replace(/^@/, "") : "";
             const dHref = discordLink(it.discord);
 
             return (
               <div key={it.id} className="glass rounded-2xl p-3 card-hover flex flex-col">
-                {/* Image: full view inside square (no crop) */}
+                {/* image uses object-contain so artwork isn't cropped */}
                 <img
                   src={it.url}
                   alt={it.title}
-                  className="w-full aspect-square object-contain rounded-xl bg-white/5"
+                  className="w-full h-56 object-contain rounded-xl bg-white/5"
                 />
 
-                <div className="mt-3">
+                <div className="mt-3 flex-1">
                   <h3 className="font-semibold">{it.title}</h3>
 
+                  {/* chips */}
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {/* X: chip filter + link */}
                     {it.x && (
                       <>
                         <button
                           className="btn-ghost text-sm px-3 py-1"
-                          onClick={() => filterByUsername(it.x!)}
+                          onClick={() => filterByUsernameX(it.x!)}
                           title={`Filter by ${it.x}`}
                         >
                           {it.x.startsWith("@") ? it.x : `@${it.x}`}
@@ -286,7 +290,6 @@ export default function GalleryPage() {
                       </>
                     )}
 
-                    {/* Discord: link (if possible) or copy handle */}
                     {it.discord && (
                       <>
                         <button
@@ -305,11 +308,11 @@ export default function GalleryPage() {
                             className="btn-ghost text-sm px-3 py-1 underline"
                             title="Open Discord profile"
                           >
-                            Open Discord ↗
+                            Open Discord
                           </a>
                         ) : (
                           <button
-                            onClick={() => copyDiscordHandle(it.discord!)}
+                            onClick={() => copyText(it.discord!)}
                             className="btn-ghost text-sm px-3 py-1 underline"
                             title="Copy Discord handle"
                           >
@@ -321,27 +324,27 @@ export default function GalleryPage() {
                   </div>
                 </div>
 
-                {/* Owner delete */}
-                {canDelete && (
+                {/* Owner Delete */}
+                {canOwnerDelete && (
                   <button
-                    onClick={() => handleDelete(it.id, false)}
-                    className="btn-ghost mt-3 text-sm text-red-400 hover:text-red-300"
+                    onClick={() => handleDeleteOwner(it)}
+                    className="btn-ghost mt-3 text-red-400 hover:text-red-300"
                     disabled={loadingId === it.id}
-                    title="Delete this artwork (uploader only)"
+                    title="Delete (uploader only)"
                   >
                     {loadingId === it.id ? "Deleting..." : "🗑 Delete"}
                   </button>
                 )}
 
-                {/* Admin delete (tiny & discreet) */}
-                {PUBLIC_ADMIN_UI && adminMode && (
+                {/* Admin Delete (tiny, gated, unobtrusive) */}
+                {ADMIN_UI && adminMode && (
                   <button
-                    onClick={() => handleDelete(it.id, true)}
-                    className="btn-ghost mt-1 text-[12px] self-start opacity-60 hover:opacity-100 text-pink-400"
+                    onClick={() => handleDeleteAdmin(it)}
+                    className="self-start mt-2 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-200 px-3 py-1 rounded"
                     disabled={loadingId === it.id}
-                    title="Admin delete (requires ADMIN_KEY)"
+                    title="Admin Delete"
                   >
-                    {loadingId === it.id ? "Deleting..." : "🗑 Delete (Admin)"}
+                    {loadingId === it.id ? "Deleting…" : "🗑 Delete (Admin)"}
                   </button>
                 )}
               </div>

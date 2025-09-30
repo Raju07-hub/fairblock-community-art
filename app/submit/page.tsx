@@ -4,9 +4,9 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 type TokenRec = {
-  metaUrl?: string;        // lokasi metadata di Blob (wajib untuk delete model baru)
-  ownerTokenHash?: string; // hash token dari server (aman untuk disimpan)
-  token?: string;          // fallback: deleteToken lama (kalau masih ada)
+  metaUrl?: string;        // lokasi metadata di Blob (penting untuk delete)
+  ownerTokenHash?: string; // hash token dari server (informasi saja)
+  token?: string;          // deleteToken legacy (fallback)
 };
 
 export default function SubmitPage() {
@@ -84,20 +84,15 @@ export default function SubmitPage() {
       }
       if (!res.ok || !data?.success) throw new Error(data?.error || "Upload failed");
 
-      // Save delete credentials locally (for delete button)
+      // ✅ Simpan credential untuk delete (owner)
       try {
         const raw = localStorage.getItem("fairblock_tokens");
         const map: Record<string, TokenRec> = raw ? JSON.parse(raw) : {};
-
-        // Support both models:
-        //  - New (Blob): metaUrl + ownerTokenHash
-        //  - Legacy: deleteToken only
         map[data.id] = {
           metaUrl: data.metaUrl,
           ownerTokenHash: data.ownerTokenHash,
-          token: data.deleteToken,
+          token: data.deleteToken, // fallback legacy
         };
-
         localStorage.setItem("fairblock_tokens", JSON.stringify(map));
       } catch {}
 
