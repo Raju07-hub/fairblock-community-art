@@ -1,102 +1,86 @@
 // app/api/gallery/[id]/route.ts
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-import { NextRequest, NextResponse } from "next/server";
-import fs from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
+import { NextResponse } from "next/server";
+import { list, put, del } from "@vercel/blob";
 
-// Bentuk item seperti yang disimpan saat upload
-type GalleryItem = {
-  id: string;
-  title: string;
-  x?: string;
-  discord?: string;
-  url: string; // kalau Blob: ini URL file blob
-  createdAt: string;
-  deleteToken: string;
-  storage?: {
-    kind: "local" | "blob";
-    path?: string;    // local absolute path
-    blobKey?: string; // optional key/path blob
-  };
-};
+const META_KEY = "gallery/metadata.json";
 
-const DATA_FILE = path.join(process.cwd(), "data", "gallery.json");
-
-async function loadList(): Promise<GalleryItem[]> {
-  if (!existsSync(DATA_FILE)) return [];
-  try {
-    const raw = await fs.readFile(DATA_FILE, "utf-8");
-    return JSON.parse(raw) as GalleryItem[];
-  } catch {
-    return [];
-  }
+async function sha256Hex(input: string) {
+  const enc = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-async function saveList(list: GalleryItem[]) {
-  await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-  await fs.writeFile(DATA_FILE, JSON.stringify(list, null, 2), "utf-8");
+async function loadMeta(): Promise<any[]> {
+  const l = await list({ prefix: META_KEY });
+  const blob = l.blobs.find(b => b.pathname === META_KEY);
+  if (!blob) return [];
+  const res = await fetch(blob.url, { cache: "no-store" });
+  if (!res.ok) return [];
+  return (await res.json().catch(() => [])) as any[];
+}
+
+async function saveMeta(items: any[]) {
+  await put(META_KEY, JSON.stringify(items, null, 2), {
+    access: "public",
+    contentType: "application/json",
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+  });
 }
 
 export async function DELETE(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  req: Request,
+  context: { params: Promise<{ id: string }> } // Next 15 expects Promise
 ) {
   try {
-    // ✅ Next.js 15: params adalah Promise
     const { id } = await context.params;
 
-    const adminHeader = req.headers.get("x-admin-key") || "";
-    const bearer = req.headers.get("authorization");
-    const tokenHeader =
+    // token owner via header atau body
+    let token =
       req.headers.get("x-delete-token") ||
-      (bearer ? bearer.replace(/^Bearer\s+/i, "") : "");
+      req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+      "";
+    if (!token) {
+      const body = await req.json().catch(() => ({}));
+      token = String(body?.ownerToken || "");
+    }
 
-    const list = await loadList();
-    const idx = list.findIndex((x) => x.id === id);
+    const adminKey = req.headers.get("x-admin-key") || "";
+    const isAdmin = !!process.env.ADMIN_KEY && adminKey === process.env.ADMIN_KEY;
+
+    const items = await loadMeta();
+    const idx = items.findIndex(it => it.id === id);
     if (idx === -1) {
       return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     }
 
-    const item = list[idx];
+    const item = items[idx];
 
-    // 🔑 Admin override
-    const isAdmin = !!process.env.ADMIN_KEY && adminHeader === process.env.ADMIN_KEY;
-    const isOwner = tokenHeader && tokenHeader === item.deleteToken;
-
-    if (!isAdmin && !isOwner) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 403 });
-    }
-
-    // 🧹 Hapus file fisik
-    try {
-      if (item.storage?.kind === "local" && item.storage.path) {
-        await fs.unlink(item.storage.path).catch(() => {});
-      } else if (item.storage?.kind === "blob") {
-        // del() butuh token RW + url atau pathname
-        if (process.env.BLOB_READ_WRITE_TOKEN) {
-          const { del } = await import("@vercel/blob");
-          const target = item.url || item.storage.blobKey || "";
-          if (target) {
-            await del(target, { token: process.env.BLOB_READ_WRITE_TOKEN }).catch(() => {});
-          }
-        }
+    if (!isAdmin) {
+      if (!token) return NextResponse.json({ success: false, error: "Missing token" }, { status: 401 });
+      const hash = await sha256Hex(token);
+      if (hash !== item.ownerTokenHash) {
+        return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 403 });
       }
-    } catch {
-      // abaikan error penghapusan fisik supaya proses tetap lanjut
     }
 
-    // 🗂️ Hapus dari JSON
-    list.splice(idx, 1);
-    await saveList(list);
+    // hapus file gambar di Blob
+    try {
+      await del(item.imageUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+    } catch {
+      // abaikan error fisik
+    }
+
+    // hapus dari metadata
+    items.splice(idx, 1);
+    await saveMeta(items);
 
     return NextResponse.json({ success: true, by: isAdmin ? "admin" : "owner" });
   } catch (e: any) {
-    return NextResponse.json(
-      { success: false, error: e?.message || "Delete failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: e?.message || "Delete failed" }, { status: 500 });
   }
 }

@@ -1,30 +1,27 @@
 // app/api/gallery/route.ts
-import { NextResponse } from "next/server";
-import fs from "fs/promises";
-import path from "path";
-
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
+
+import { NextResponse } from "next/server";
+import { list } from "@vercel/blob";
+
+const META_KEY = "gallery/metadata.json";
 
 export async function GET() {
   try {
-    const dataFile = path.join(process.cwd(), "data", "gallery.json");
-    let items = [];
-    try {
-      items = JSON.parse(await fs.readFile(dataFile, "utf-8"));
-    } catch {}
+    const l = await list({ prefix: META_KEY });
+    const metaBlob = l.blobs.find(b => b.pathname === META_KEY);
+    if (!metaBlob) return NextResponse.json({ success: true, items: [] });
 
-    const publicItems = items.map((it: any) => ({
-      id: it.id,
-      title: it.title,
-      x: it.x,
-      discord: it.discord,
-      url: it.url,
-      createdAt: it.createdAt,
-    }));
+    const res = await fetch(metaBlob.url, { cache: "no-store" });
+    if (!res.ok) return NextResponse.json({ success: true, items: [] });
 
-    return NextResponse.json({ success: true, items: publicItems });
+    const all = (await res.json().catch(() => [])) as any[];
+    // sembunyikan ownerTokenHash dari client
+    const items = all.map(({ ownerTokenHash, ...pub }) => pub);
+
+    return NextResponse.json({ success: true, items });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e?.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: e?.message || "Failed" }, { status: 500 });
   }
 }

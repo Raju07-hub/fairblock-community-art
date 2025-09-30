@@ -1,27 +1,46 @@
-export const runtime = "nodejs";
+// app/api/submit/route.ts
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import fs from "fs/promises";
-import path from "path";
-import { randomBytes, randomUUID } from "crypto";
+import { put, list } from "@vercel/blob";
 
 type GalleryItem = {
   id: string;
   title: string;
   x?: string;
   discord?: string;
-  url: string;
+  imageUrl: string;
   createdAt: string;
-  deleteToken: string;          // token untuk hapus
-  storage?: {                   // info lokasi file
-    kind: "local" | "blob";
-    path?: string;              // path lokal (hapus local)
-    blobKey?: string;           // key blob (hapus blob)
-  };
+  ownerTokenHash: string; // hash dari deleteToken (agar aman)
 };
 
-const MAX_SIZE = 8 * 1024 * 1024; // 8MB
+const META_KEY = "gallery/metadata.json";
+
+async function sha256Hex(input: string) {
+  const enc = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function loadMeta(): Promise<GalleryItem[]> {
+  const l = await list({ prefix: META_KEY });
+  const metaBlob = l.blobs.find(b => b.pathname === META_KEY);
+  if (!metaBlob) return [];
+  const res = await fetch(metaBlob.url, { cache: "no-store" });
+  if (!res.ok) return [];
+  return (await res.json().catch(() => [])) as GalleryItem[];
+}
+
+async function saveMeta(items: GalleryItem[]) {
+  await put(META_KEY, JSON.stringify(items, null, 2), {
+    access: "public",
+    contentType: "application/json",
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+  });
+}
 
 export async function POST(req: Request) {
   try {
@@ -34,54 +53,41 @@ export async function POST(req: Request) {
     if (!title) return NextResponse.json({ success: false, error: "Title is required." }, { status: 400 });
     if (!file || typeof file === "string") return NextResponse.json({ success: false, error: "File is required." }, { status: 400 });
     if (!file.type.startsWith("image/")) return NextResponse.json({ success: false, error: "File must be an image." }, { status: 400 });
-    if (file.size > MAX_SIZE) return NextResponse.json({ success: false, error: "Max 8MB allowed." }, { status: 400 });
+    if (file.size > 8 * 1024 * 1024) return NextResponse.json({ success: false, error: "Max 8MB allowed." }, { status: 400 });
 
-    const safeName = file.name.replace(/[^\w.-]+/g, "_") || "image";
-    const fileName = `${Date.now()}_${safeName}`;
-    const createdAt = new Date().toISOString();
-    const id = randomUUID();
-    const deleteToken = randomBytes(24).toString("hex");
+    // upload gambar ke Blob (pakai stream bawaan File)
+    const safe = (file.name || "image").replace(/[^\w.-]+/g, "_");
+    const imageKey = `gallery/${Date.now()}_${safe}`;
+    const uploaded = await put(imageKey, file.stream(), {
+      access: "public",
+      contentType: file.type,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
 
-    let publicUrl = "";
-    let storageInfo: GalleryItem["storage"] = { kind: "local" };
+    // token owner (plaintext untuk client; disimpan versi hash di metadata)
+    const deleteToken = crypto.randomUUID();
+    const ownerTokenHash = await sha256Hex(deleteToken);
 
-    if (process.env.BLOB_READ_WRITE_TOKEN) {
-      const { put } = await import("@vercel/blob");
+    const item: GalleryItem = {
+      id: crypto.randomUUID(),
+      title,
+      x,
+      discord,
+      imageUrl: uploaded.url,
+      createdAt: new Date().toISOString(),
+      ownerTokenHash,
+    };
 
-      // gunakan Buffer (bukan Uint8Array)
-      const bytes = Buffer.from(await file.arrayBuffer());
-
-      const blob = await put(`fairblock/${fileName}`, bytes, {
-        access: "public",
-        contentType: file.type,
-        token: String(process.env.BLOB_READ_WRITE_TOKEN),
-      });
-
-      publicUrl = blob.url;
-      storageInfo = {
-        kind: "blob",
-        blobKey: (blob as any).pathname ?? (blob as any).key ?? `fairblock/${fileName}`,
-      };
-    } else {
-      const publicDir = path.join(process.cwd(), "public", "uploads");
-      await fs.mkdir(publicDir, { recursive: true });
-      const dest = path.join(publicDir, fileName);
-      await fs.writeFile(dest, Buffer.from(await file.arrayBuffer()));
-      publicUrl = `/uploads/${fileName}`;
-      storageInfo = { kind: "local", path: dest };
-    }
-
-    // simpan metadata
-    const dataDir = path.join(process.cwd(), "data");
-    const dataFile = path.join(dataDir, "gallery.json");
-    await fs.mkdir(dataDir, { recursive: true });
-    let items: GalleryItem[] = [];
-    try { items = JSON.parse(await fs.readFile(dataFile, "utf-8")); } catch {}
-    const item: GalleryItem = { id, title, x, discord, url: publicUrl, createdAt, deleteToken, storage: storageInfo };
+    const items = await loadMeta();
     items.unshift(item);
-    await fs.writeFile(dataFile, JSON.stringify(items, null, 2), "utf-8");
+    await saveMeta(items);
 
-    return NextResponse.json({ success: true, id, url: publicUrl, deleteToken });
+    return NextResponse.json({
+      success: true,
+      id: item.id,
+      imageUrl: item.imageUrl,
+      deleteToken, // simpan di localStorage client
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err?.message || "Upload failed" }, { status: 500 });
   }
