@@ -1,55 +1,57 @@
-// app/api/gallery/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { list } from "@vercel/blob";
 
-// Helper untuk list blob
-async function listMeta(prefix: string, cursor: string | null, token: string) {
-  const { list } = await import("@vercel/blob");
-  return list({
-    token,
-    prefix,
-    cursor: cursor || undefined,
-  });
-}
+type GalleryItem = {
+  id: string;
+  title: string;
+  x?: string;
+  discord?: string;
+  url: string;        // image url
+  createdAt: string;
+  metaUrl: string;    // <- penting untuk delete
+};
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const url = new URL(req.url);
-    const cursor = url.searchParams.get("cursor");
-    const token = process.env.BLOB_READ_WRITE_TOKEN;
-    if (!token) {
-      return NextResponse.json({ success: false, error: "Missing BLOB_READ_WRITE_TOKEN" }, { status: 500 });
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      return NextResponse.json({ success: true, items: [], nextCursor: null, count: 0 });
     }
 
-    // meta disimpan di fairblock/meta/{id}.json
-    const { blobs, hasMore, cursor: nextCursor } = await listMeta("fairblock/meta/", cursor, token);
-
-    // Ambil maksimal 50 meta (kalau mau paging, gunakan cursor yg dikembalikan)
-    const toFetch = blobs.slice(0, 50);
-
-    // Fetch isi meta JSON paralel
-    const metas = await Promise.all(
-      toFetch.map(async (b) => {
-        const r = await fetch(b.url, { cache: "no-store" });
-        if (!r.ok) return null;
-        const j = await r.json();
-        return j;
-      })
-    );
-
-    // Filter null dan sort newest
-    const items = metas
-      .filter(Boolean)
-      .sort((a: any, b: any) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-
-    return NextResponse.json({
-      success: true,
-      items,
-      nextCursor: hasMore ? nextCursor ?? null : null,
-      count: items.length,
+    // Ambil semua file meta
+    const metas = await list({
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      prefix: "fairblock/meta/",
+      limit: 1000,
     });
+
+    const items: GalleryItem[] = [];
+    for (const f of metas.blobs) {
+      try {
+        const metaUrl = f.url;
+        const r = await fetch(metaUrl, { cache: "no-store" });
+        if (!r.ok) continue;
+        const m = await r.json();
+        // validasi minimum
+        if (!m?.id || !m?.imageUrl || !m?.title) continue;
+        items.push({
+          id: m.id,
+          title: m.title,
+          x: m.x,
+          discord: m.discord,
+          url: m.imageUrl,
+          createdAt: m.createdAt || new Date().toISOString(),
+          metaUrl, // ← dipakai tombol Delete
+        });
+      } catch {}
+    }
+
+    // urutkan terbaru
+    items.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+
+    return NextResponse.json({ success: true, items, nextCursor: null, count: items.length });
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e?.message }, { status: 500 });
   }

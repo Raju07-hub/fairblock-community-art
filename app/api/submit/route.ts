@@ -1,23 +1,22 @@
-// app/api/submit/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { put } from "@vercel/blob";
 import { randomBytes, randomUUID, createHash } from "crypto";
 
-// ↪ kita import saat runtime supaya type cocok di Node
-async function putBlob(name: string, body: Buffer | string, contentType: string, token: string) {
-  const { put } = await import("@vercel/blob");
-  return put(name, body, {
-    access: "public",
-    contentType,
-    token,
-  });
-}
+type Out = {
+  success: boolean;
+  id?: string;
+  url?: string;
+  metaUrl?: string;
+  deleteToken?: string;
+  error?: string;
+};
 
 const MAX_SIZE = 8 * 1024 * 1024; // 8MB
 
-export async function POST(req: Request) {
+export async function POST(req: Request): Promise<NextResponse<Out>> {
   try {
     const form = await req.formData();
     const title = String(form.get("title") || "").trim();
@@ -30,43 +29,45 @@ export async function POST(req: Request) {
     if (!file.type.startsWith("image/")) return NextResponse.json({ success: false, error: "File must be an image." }, { status: 400 });
     if (file.size > MAX_SIZE) return NextResponse.json({ success: false, error: "Max 8MB allowed." }, { status: 400 });
 
-    const token = process.env.BLOB_READ_WRITE_TOKEN;
-    if (!token) {
-      return NextResponse.json({ success: false, error: "Missing BLOB_READ_WRITE_TOKEN on server." }, { status: 500 });
+    // === Always use Vercel Blob in prod ===
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      return NextResponse.json({ success: false, error: "Missing BLOB_READ_WRITE_TOKEN" }, { status: 500 });
     }
 
-    const safeName = (file.name || "image").replace(/[^\w.-]+/g, "_");
     const id = randomUUID();
     const createdAt = new Date().toISOString();
     const deleteToken = randomBytes(24).toString("hex");
     const ownerTokenHash = createHash("sha256").update(deleteToken).digest("hex");
 
-    // 1) upload image
+    // Upload image
     const imgBytes = Buffer.from(await file.arrayBuffer());
-    const imagePath = `fairblock/images/${id}-${safeName}`;
-    const img = await putBlob(imagePath, imgBytes, file.type, token);
-    const imageUrl = img.url;
+    const imgNameSafe = (file.name || "image").replace(/[^\w.-]+/g, "_");
+    const imgKey = `fairblock/images/${id}_${imgNameSafe}`;
+    const img = await put(imgKey, imgBytes, {
+      access: "public",
+      contentType: file.type,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
 
-    // 2) upload meta JSON
-    const meta = {
-      id,
-      title,
-      x,
-      discord,
-      imageUrl,
-      ownerTokenHash, // yg disimpan di Blob (bukan deleteToken asli)
-      createdAt,
-    };
-    const metaPath = `fairblock/meta/${id}.json`;
-    const metaBlob = await putBlob(metaPath, Buffer.from(JSON.stringify(meta)), "application/json", token);
+    // Upload metadata (berisi hash token, bukan token aslinya)
+    const metaKey = `fairblock/meta/${id}.json`;
+    const metaBody = JSON.stringify(
+      { id, title, x, discord, imageUrl: img.url, createdAt, ownerTokenHash },
+      null,
+      2
+    );
+    const meta = await put(metaKey, metaBody, {
+      access: "public",
+      contentType: "application/json",
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
 
-    // 3) balikan data ke client (client simpan deleteToken & metaUrl di localStorage)
     return NextResponse.json({
       success: true,
       id,
-      imageUrl,
-      metaUrl: metaBlob.url,
-      deleteToken,
+      url: img.url,
+      metaUrl: meta.url,
+      deleteToken, // client simpan lokal buat bukti kepemilikan
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err?.message || "Upload failed" }, { status: 500 });
