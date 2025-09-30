@@ -1,18 +1,24 @@
+// components/Footer.tsx
 "use client";
 
 export default function Footer() {
-  const address = "0x00B8Dfd0c24173D67eff903C57875559332b2379";
+  // alamat asli
+  const addr = "0x00B8Dfd0c24173D67eff903C57875559332b2379";
 
-  function copyAddress() {
-    navigator.clipboard.writeText(address).then(() => {
-      alert("Address copied:\n" + address);
-    });
+  async function copyAddr() {
+    try {
+      await navigator.clipboard.writeText(addr);
+      alert("Address copied: " + addr);
+    } catch {
+      alert("Failed to copy address");
+    }
   }
 
   return (
     <footer className="h-20 w-full bg-[#0B0D17]/95 border-t border-white/10">
       <div className="max-w-6xl mx-auto h-full px-5 sm:px-6 flex items-center justify-between">
-        {/* Left */}
+        
+        {/* Left text */}
         <p className="text-xs sm:text-sm text-white/70">
           Built by{" "}
           <a
@@ -26,23 +32,24 @@ export default function Footer() {
           . © 2025 Fairblock Community.
         </p>
 
-        {/* Center → Tip Me */}
-        <div className="flex flex-col items-center gap-1">
-          <button
-            onClick={copyAddress}
-            className="btn-ghost px-3 py-1 text-xs"
-            title="Click to copy address"
-          >
-            💜 Tip Me
-          </button>
-          <img
-            src="/tipme-qr.png" // ← taruh QR code kamu di /public/tipme-qr.png
-            alt="Tip QR"
-            className="w-12 h-12 rounded-md"
-          />
+        {/* Center Tip Me */}
+        <div className="footer-tip mx-auto">
+          <img src="/qr-tip.png" alt="Tip QR" />
+          <div className="flex flex-col">
+            <button onClick={copyAddr} className="btn-ghost text-xs px-3 py-1">
+              💜 Tip Me
+            </button>
+            <span
+              className="addr cursor-pointer"
+              onClick={copyAddr}
+              title={addr}
+            >
+              {addr.slice(0, 6)}...{addr.slice(-4)}
+            </span>
+          </div>
         </div>
 
-        {/* Right */}
+        {/* Right links */}
         <div className="hidden sm:flex items-center gap-5 text-xs sm:text-sm">
           <a
             href="https://x.com/0xfairblock"

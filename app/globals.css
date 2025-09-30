@@ -98,3 +98,20 @@ input[type="text"], input[type="search"] {
   margin-top: .35rem;
 }
 
+/* ==== Footer TipMe ==== */
+.footer-tip {
+  @apply flex items-center gap-3 px-3 py-2 rounded-xl;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.footer-tip img {
+  @apply h-10 w-10 rounded-md object-contain;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.footer-tip .addr {
+  @apply text-[10px] text-white/60 hover:text-white/80 text-left;
+}
+
+
