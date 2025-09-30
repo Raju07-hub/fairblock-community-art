@@ -1,27 +1,43 @@
 // app/api/gallery/route.ts
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { list } from "@vercel/blob";
 
-const META_KEY = "gallery/metadata.json";
+const META_PREFIX = "gallery/meta/";
 
 export async function GET() {
   try {
-    const l = await list({ prefix: META_KEY });
-    const metaBlob = l.blobs.find(b => b.pathname === META_KEY);
-    if (!metaBlob) return NextResponse.json({ success: true, items: [] });
+    // Ambil semua meta JSON (paginate jika perlu)
+    let cursor: string | undefined = undefined;
+    const metas: any[] = [];
 
-    const res = await fetch(metaBlob.url, { cache: "no-store" });
-    if (!res.ok) return NextResponse.json({ success: true, items: [] });
+    do {
+      const res = await list({ prefix: META_PREFIX, cursor, token: process.env.BLOB_READ_WRITE_TOKEN });
+      for (const b of res.blobs) {
+        // fetch meta JSON (public) → parse
+        const r = await fetch(b.url, { cache: "no-store" });
+        if (!r.ok) continue;
+        const meta = await r.json();
+        metas.push(meta);
+      }
+      cursor = res.cursor;
+    } while (cursor);
 
-    const all = (await res.json().catch(() => [])) as any[];
-    // sembunyikan ownerTokenHash dari client
-    const items = all.map(({ ownerTokenHash, ...pub }) => pub);
+    // Urutkan terbaru dulu (createdAt desc) & buang deleteToken sebelum kirim
+    metas.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    const items = metas.map((it) => ({
+      id: it.id,
+      title: it.title,
+      x: it.x,
+      discord: it.discord,
+      url: it.url,
+      createdAt: it.createdAt,
+    }));
 
     return NextResponse.json({ success: true, items });
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e?.message || "Failed" }, { status: 500 });
+    return NextResponse.json({ success: false, error: e?.message || "List failed" }, { status: 500 });
   }
 }
