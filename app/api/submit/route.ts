@@ -3,83 +3,95 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { put } from "@vercel/blob";
-import { randomBytes, randomUUID } from "crypto";
+import path from "path";
+import fs from "fs/promises";
+import { randomBytes, randomUUID, createHash } from "crypto";
 
-type GalleryItem = {
+type PutBody = Blob | Buffer | ReadableStream | File;
+
+type Meta = {
   id: string;
   title: string;
   x?: string;
   discord?: string;
-  url: string;        // public URL image
+  url: string;              // public URL ke gambar
   createdAt: string;
-  deleteToken: string; // hanya disimpan di meta, JANGAN dikirim ke client pada GET
+  ownerTokenHash: string;   // sha256(deleteToken)
 };
 
 const MAX_SIZE = 8 * 1024 * 1024; // 8MB
-const IMAGES_PREFIX = "gallery/images";
-const META_PREFIX   = "gallery/meta";
 
 export async function POST(req: Request) {
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json(
-        { success: false, error: "Missing BLOB_READ_WRITE_TOKEN" },
-        { status: 500 }
-      );
-    }
-
     const form = await req.formData();
-    const title   = String(form.get("title") || "").trim();
-    const x       = String(form.get("x") || "").trim();
+    const title = String(form.get("title") || "").trim();
+    const x = String(form.get("x") || "").trim();
     const discord = String(form.get("discord") || "").trim();
-    const file    = form.get("file") as File | null;
+    const file = form.get("file") as File | null;
 
     if (!title) return NextResponse.json({ success: false, error: "Title is required." }, { status: 400 });
-    if (!file || typeof file === "string") return NextResponse.json({ success: false, error: "File is required." }, { status: 400 });
-    if (!file.type.startsWith("image/")) return NextResponse.json({ success: false, error: "File must be an image." }, { status: 400 });
-    if (file.size > MAX_SIZE) return NextResponse.json({ success: false, error: "Max 8MB allowed." }, { status: 400 });
+    if (!file || typeof file === "string")
+      return NextResponse.json({ success: false, error: "File is required." }, { status: 400 });
+    if (!file.type.startsWith("image/"))
+      return NextResponse.json({ success: false, error: "File must be an image." }, { status: 400 });
+    if (file.size > MAX_SIZE)
+      return NextResponse.json({ success: false, error: "Max 8MB allowed." }, { status: 400 });
 
-    const safeName = (file.name || "image").replace(/[^\w.-]+/g, "_");
-    const id           = randomUUID();
-    const createdAt    = new Date().toISOString();
-    const deleteToken  = randomBytes(24).toString("hex");
+    const safeName = file.name.replace(/[^\w.-]+/g, "_") || "image";
+    const fileName = `${Date.now()}_${safeName}`;
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    const deleteToken = randomBytes(24).toString("hex");
 
-    // 1) Upload image
-    const imageKey = `${IMAGES_PREFIX}/${id}_${safeName}`;
-    const imageBytes = Buffer.from(await file.arrayBuffer());
-    const imageBlob = await put(imageKey, imageBytes, {
-      access: "public",
-      contentType: file.type,
-      token: process.env.BLOB_READ_WRITE_TOKEN,
-    });
+    // ===== Upload gambar ke Blob (jika token tersedia), fallback ke local public/uploads saat dev =====
+    let publicUrl = "";
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      const { put } = await import("@vercel/blob");
+      const body: PutBody = Buffer.from(await file.arrayBuffer());
+      const blob = await put(`fairblock/${fileName}`, body, {
+        access: "public",
+        contentType: file.type,
+        token: process.env.BLOB_READ_WRITE_TOKEN!,
+      });
+      publicUrl = blob.url;
+    } else {
+      // local (untuk dev)
+      const publicDir = path.join(process.cwd(), "public", "uploads");
+      await fs.mkdir(publicDir, { recursive: true });
+      const dest = path.join(publicDir, fileName);
+      await fs.writeFile(dest, Buffer.from(await file.arrayBuffer()));
+      publicUrl = `/uploads/${fileName}`;
+    }
 
-    // 2) Simpan metadata 1-file-per-item (mudah di-list & dihapus)
-    const meta: GalleryItem = {
-      id, title, x, discord,
-      url: imageBlob.url,
-      createdAt,
+    // ===== Buat META JSON di Blob (supaya Gallery & Delete tak pakai file JSON lokal) =====
+    let metaUrl = "";
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      const { put } = await import("@vercel/blob");
+      const meta: Meta = {
+        id,
+        title,
+        x,
+        discord,
+        url: publicUrl,
+        createdAt,
+        ownerTokenHash: createHash("sha256").update(deleteToken).digest("hex"),
+      };
+      const metaBlob = await put(`fairblock/meta/${id}.json`, Buffer.from(JSON.stringify(meta)), {
+        access: "public",
+        contentType: "application/json",
+        token: process.env.BLOB_READ_WRITE_TOKEN!,
+      });
+      metaUrl = metaBlob.url;
+    }
+
+    return NextResponse.json({
+      success: true,
+      id,
+      url: publicUrl,
       deleteToken,
-    };
-    const metaKey = `${META_PREFIX}/${id}.json`;
-    await put(metaKey, JSON.stringify(meta, null, 2), {
-      access: "public",                 // boleh public; GET nanti tidak akan kirim deleteToken
-      contentType: "application/json",
-      token: process.env.BLOB_READ_WRITE_TOKEN,
+      metaUrl, // <- dipakai client utk simpan mapping & oleh /api/gallery DELETE
     });
-
-    // 3) Balikkan info ke client (jangan bocorkan token di GET — ini hanya untuk localStorage)
-    return NextResponse.json({ success: true, id, url: imageBlob.url, deleteToken });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err?.message || "Upload failed" }, { status: 500 });
   }
 }
-
-// const map: Record<string, string> = raw ? JSON.parse(raw) : {};
-// map[data.id] = data.deleteToken;
-
-type TokenMap = Record<string, { token: string; metaUrl: string }>;
-const raw = localStorage.getItem("fairblock_tokens");
-const map: TokenMap = raw ? JSON.parse(raw) : {};
-map[data.id] = { token: data.deleteToken, metaUrl: data.metaUrl };
-localStorage.setItem("fairblock_tokens", JSON.stringify(map));
