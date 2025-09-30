@@ -3,8 +3,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { put } from "@vercel/blob";
 import { randomBytes, randomUUID, createHash } from "crypto";
+
+// ↪ kita import saat runtime supaya type cocok di Node
+async function putBlob(name: string, body: Buffer | string, contentType: string, token: string) {
+  const { put } = await import("@vercel/blob");
+  return put(name, body, {
+    access: "public",
+    contentType,
+    token,
+  });
+}
 
 const MAX_SIZE = 8 * 1024 * 1024; // 8MB
 
@@ -27,46 +36,37 @@ export async function POST(req: Request) {
     }
 
     const safeName = (file.name || "image").replace(/[^\w.-]+/g, "_");
-    const fileName = `${Date.now()}_${safeName}`;
-    const createdAt = new Date().toISOString();
     const id = randomUUID();
-
-    // Owner delete token (client-only)
+    const createdAt = new Date().toISOString();
     const deleteToken = randomBytes(24).toString("hex");
     const ownerTokenHash = createHash("sha256").update(deleteToken).digest("hex");
 
-    // Upload image
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const imageBlob = await put(`fairblock/images/${fileName}`, bytes, {
-      access: "public",
-      contentType: file.type,
-      token,
-    });
+    // 1) upload image
+    const imgBytes = Buffer.from(await file.arrayBuffer());
+    const imagePath = `fairblock/images/${id}-${safeName}`;
+    const img = await putBlob(imagePath, imgBytes, file.type, token);
+    const imageUrl = img.url;
 
-    // Write meta json beside it
+    // 2) upload meta JSON
     const meta = {
       id,
       title,
       x,
       discord,
-      imageUrl: imageBlob.url,
+      imageUrl,
+      ownerTokenHash, // yg disimpan di Blob (bukan deleteToken asli)
       createdAt,
-      ownerTokenHash,
-      version: 1,
     };
+    const metaPath = `fairblock/meta/${id}.json`;
+    const metaBlob = await putBlob(metaPath, Buffer.from(JSON.stringify(meta)), "application/json", token);
 
-    const metaBlob = await put(`fairblock/meta/${id}.json`, JSON.stringify(meta), {
-      access: "public",
-      contentType: "application/json",
-      token,
-    });
-
+    // 3) balikan data ke client (client simpan deleteToken & metaUrl di localStorage)
     return NextResponse.json({
       success: true,
       id,
-      url: imageBlob.url,
-      deleteToken,          // keep only on the client
-      metaUrl: metaBlob.url // handy for delete-by-meta later
+      imageUrl,
+      metaUrl: metaBlob.url,
+      deleteToken,
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err?.message || "Upload failed" }, { status: 500 });
