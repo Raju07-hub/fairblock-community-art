@@ -8,22 +8,23 @@ export default function Footer() {
   const copyAddr = async () => {
     try {
       await navigator.clipboard.writeText(wallet);
-      // snackbar sederhana:
+      // snack mini
       const el = document.createElement("div");
       el.textContent = "Wallet address copied!";
       el.className =
         "fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] px-3 py-2 rounded-full bg-white/10 text-white text-sm ring-1 ring-white/15";
       document.body.appendChild(el);
-      setTimeout(() => el.remove(), 1400);
+      setTimeout(() => el.remove(), 1200);
     } catch {
       alert("Failed to copy wallet address.");
     }
   };
 
   return (
-    <footer className="h-16 w-full bg-[#0B0D17]/95 border-t border-white/10">
-      {/* Grid 3 kolom: kiri (credit), tengah (Tip), kanan (links) */}
-      <div className="max-w-6xl mx-auto h-full px-5 sm:px-6 grid grid-cols-1 sm:grid-cols-3 items-center">
+    // min-h supaya tinggi minimal 64px, tapi bisa auto nambah saat QR muncul
+    <footer className="min-h-16 w-full bg-[#0B0D17]/95 border-t border-white/10 py-3">
+      {/* 3 kolom: kiri / tengah (Tip) / kanan */}
+      <div className="max-w-6xl mx-auto px-5 sm:px-6 grid grid-cols-1 sm:grid-cols-3 items-center">
         {/* Kiri */}
         <p className="text-xs sm:text-sm text-white/70 order-2 sm:order-1 justify-self-start mt-2 sm:mt-0">
           Built by{" "}
@@ -38,8 +39,8 @@ export default function Footer() {
           . © 2025 Fairblock Community.
         </p>
 
-        {/* Tengah (selalu center → sejajar dengan mascot yang center) */}
-        <div className="order-1 sm:order-2 justify-self-center relative">
+        {/* Tengah: tombol + QR DI BAWAH tombol */}
+        <div className="order-1 sm:order-2 justify-self-center flex flex-col items-center gap-2">
           <button
             onClick={() => {
               copyAddr();
@@ -51,10 +52,15 @@ export default function Footer() {
             💜 Tip Me
           </button>
 
-          {/* QR muncul di atas tombol, tetap di dalam footer */}
           {showQR && (
-            <div className="absolute -top-36 left-1/2 -translate-x-1/2 glass p-2 rounded-lg shadow-lg">
-              <img src="/wallet-qr.png" alt="Wallet QR" className="w-28 h-28" />
+            <div className="glass p-2 rounded-lg shadow-lg">
+              {/* QR kotak & kecil: 80x80 (bisa naikkan ke w-24 h-24 kalau mau) */}
+              <img
+                src="/wallet-qr.png"
+                alt="Wallet QR"
+                className="w-20 h-20 rounded-md object-contain block"
+                draggable={false}
+              />
             </div>
           )}
         </div>
