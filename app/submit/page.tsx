@@ -4,10 +4,14 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 type TokenRec = {
-  metaUrl?: string;        // lokasi metadata di Blob (model baru)
-  ownerTokenHash?: string; // hash token dari server (aman)
-  token?: string;          // fallback deleteToken (legacy)
+  metaUrl?: string;
+  ownerTokenHash?: string;
+  token?: string;
 };
+
+const MAX_BYTES = 8 * 1024 * 1024;        // 8 MB
+const TARGET_BYTES = 7.9 * 1024 * 1024;   // target sedikit di bawah 8MB
+const MAX_SIDE = 4096;                    // batasi sisi terpanjang jika gambar sangat besar
 
 export default function SubmitPage() {
   const router = useRouter();
@@ -17,8 +21,80 @@ export default function SubmitPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [workingFile, setWorkingFile] = useState<File | null>(null);
 
-  // ---- helpers --------------------------------------------------------------
+  // ---------- Image utils ----------
+  function createImage(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  async function compressIfNeeded(original: File): Promise<File> {
+    if (!/^image\/(png|jpeg|webp)$/i.test(original.type)) {
+      // format tidak didukung → tetap kirim apa adanya
+      return original;
+    }
+    if (original.size <= MAX_BYTES) return original;
+
+    // pakai webp utk rasio bagus, kecuali asalnya jpeg (boleh stay jpeg)
+    const targetMime = original.type === "image/jpeg" ? "image/jpeg" : "image/webp";
+
+    // load ke img/canvas
+    const blobUrl = URL.createObjectURL(original);
+    const img = await createImage(blobUrl);
+    URL.revokeObjectURL(blobUrl);
+
+    // hitung dimension baru (jika perlu perkecil)
+    let { width, height } = img;
+    const longSide = Math.max(width, height);
+    if (longSide > MAX_SIDE) {
+      const scale = MAX_SIDE / longSide;
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(img, 0, 0, width, height);
+
+    // binary search quality 0.95 .. 0.5 untuk capai TARGET_BYTES
+    let lo = 0.5, hi = 0.95, bestBlob: Blob | null = null;
+    for (let i = 0; i < 8; i++) {
+      const q = (lo + hi) / 2;
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), targetMime, q)
+      );
+      if (!blob) break;
+
+      if (blob.size > TARGET_BYTES) {
+        // masih kegedean → turunkan quality
+        hi = q;
+      } else {
+        bestBlob = blob; // acceptable, coba naikkan dikit biar tidak terlalu burik
+        lo = q;
+      }
+    }
+
+    const out = bestBlob ?? (await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), targetMime, 0.7)
+    ));
+
+    if (!out) return original;
+
+    // pastikan nama & type
+    const newName = original.name.replace(/\.(png|jpg|jpeg|webp)$/i, "") +
+      (targetMime === "image/webp" ? ".webp" : ".jpg");
+
+    return new File([out], newName, { type: targetMime, lastModified: Date.now() });
+  }
+
+  // ---------- UI helpers ----------
   function validateAndPreview(f?: File) {
     if (!f) return;
     const okTypes = ["image/png", "image/jpeg", "image/webp"];
@@ -26,12 +102,9 @@ export default function SubmitPage() {
       alert("File must be PNG, JPG, or WEBP.");
       return;
     }
-    if (f.size > 8 * 1024 * 1024) {
-      alert("Maximum file size is 8MB.");
-      return;
-    }
     setFileName(f.name);
     setPreview(URL.createObjectURL(f));
+    setWorkingFile(f);
   }
 
   function onFilePick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -65,17 +138,29 @@ export default function SubmitPage() {
     setIsDragging(false);
   }
 
-  // ---- submit ---------------------------------------------------------------
+  // ---------- Submit ----------
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
     const fd = new FormData(form);
 
+    const picked = workingFile ?? (fileInputRef.current?.files?.[0] || null);
+    if (!picked) {
+      alert("Please choose an image.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await fetch("/api/submit", { method: "POST", body: fd });
-      const text = await res.text();
+      const toSend = await compressIfNeeded(picked);
 
+      // ganti file di FormData (hapus "file" lama kalau ada)
+      fd.delete("file");
+      fd.append("file", toSend, toSend.name);
+
+      const res = await fetch("/api/submit", { method: "POST", body: fd });
+
+      const text = await res.text();
       let data: any;
       try {
         data = JSON.parse(text);
@@ -84,14 +169,14 @@ export default function SubmitPage() {
       }
       if (!res.ok || !data?.success) throw new Error(data?.error || "Upload failed");
 
-      // Simpan credential untuk delete (owner)
+      // simpan credential delete
       try {
         const raw = localStorage.getItem("fairblock_tokens");
         const map: Record<string, TokenRec> = raw ? JSON.parse(raw) : {};
         map[data.id] = {
-          metaUrl: data.metaUrl,                // model Blob
-          ownerTokenHash: data.ownerTokenHash,  // model Blob (info)
-          token: data.deleteToken,              // legacy
+          metaUrl: data.metaUrl,
+          ownerTokenHash: data.ownerTokenHash,
+          token: data.deleteToken,
         };
         localStorage.setItem("fairblock_tokens", JSON.stringify(map));
       } catch {}
@@ -100,6 +185,7 @@ export default function SubmitPage() {
       form.reset();
       setPreview(null);
       setFileName("");
+      setWorkingFile(null);
       router.push("/gallery");
     } catch (err: any) {
       alert(err?.message || "Upload failed");
@@ -108,10 +194,9 @@ export default function SubmitPage() {
     }
   }
 
-  // ---- ui -------------------------------------------------------------------
+  // ---------- UI ----------
   return (
     <div className="max-w-3xl mx-auto px-5 sm:px-6 py-10">
-      {/* Top nav */}
       <div className="flex gap-3 mb-6">
         <a href="/" className="btn">⬅ Back to Home</a>
         <a href="/gallery" className="btn">View Gallery</a>
@@ -165,7 +250,9 @@ export default function SubmitPage() {
           <div className="dropzone__hint">
             {fileName ? `Selected: ${fileName}` : "Drag & drop image here, or click to choose"}
           </div>
-          <div className="dropzone__sub">Format: PNG / JPG / WEBP — Max 8MB</div>
+          <div className="dropzone__sub">
+            Format: PNG / JPG / WEBP — Max 8MB (auto compress if larger)
+          </div>
         </label>
 
         {preview && (

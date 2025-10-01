@@ -114,4 +114,8 @@ input[type="text"], input[type="search"] {
   @apply text-[10px] text-white/60 hover:text-white/80 text-left;
 }
 
+/* Safe area helper (iOS) */
+:root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
+footer { padding-bottom: max(0px, var(--safe-bottom)); }
+
 
