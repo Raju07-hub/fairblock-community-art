@@ -16,8 +16,9 @@ export default function Footer() {
   };
 
   return (
-    <footer className="h-16 w-full bg-[#0B0D17]/95 border-t border-white/10 relative">
-      <div className="max-w-6xl mx-auto h-full px-5 sm:px-6 flex items-center justify-between relative">
+    <footer className="w-full bg-[#0B0D17]/95 border-t border-white/10">
+      <div className="max-w-6xl mx-auto px-5 sm:px-6 py-4 flex items-center justify-between relative">
+        {/* Kiri */}
         <p className="text-xs sm:text-sm text-white/70">
           Built by{" "}
           <a
@@ -31,8 +32,8 @@ export default function Footer() {
           . © 2025 Fairblock Community.
         </p>
 
-        {/* Tip Me */}
-        <div className="absolute left-1/2 transform -translate-x-1/2 -top-20 flex flex-col items-center">
+        {/* Tengah → Tip Me */}
+        <div className="absolute left-1/2 transform -translate-x-1/2 flex flex-col items-center">
           <button
             onClick={() => {
               copyAddr();
@@ -45,12 +46,13 @@ export default function Footer() {
           </button>
 
           {showQR && (
-            <div className="mt-3 glass p-2 rounded-lg shadow-lg">
+            <div className="mt-3 glass p-2 rounded-lg shadow-lg qr-glow">
               <img src="/wallet-qr.png" alt="Wallet QR" className="w-28 h-28" />
             </div>
           )}
         </div>
 
+        {/* Kanan */}
         <div className="hidden sm:flex items-center gap-5 text-xs sm:text-sm">
           <a
             href="https://x.com/0xfairblock"
