@@ -11,23 +11,22 @@ type Item = {
   discord?: string;
   url: string;
   createdAt: string;
-  metaUrl?: string; // dikirim dari /api/gallery (scan blob)
+  metaUrl?: string; // from /api/gallery (scan blob)
 };
 
 type TokenRec = {
-  metaUrl?: string;        // lokasi metadata di Blob
-  ownerTokenHash?: string; // hash (boleh disimpan)
-  token?: string;          // legacy (kalau masih ada)
+  metaUrl?: string;
+  ownerTokenHash?: string;
+  token?: string;
 };
 
 const ADMIN_UI = process.env.NEXT_PUBLIC_ADMIN_UI === "true";
 
-/** Ambil ADMIN_KEY dari session (atau prompt sekali). */
 function getAdminKeyFromSession(): string | null {
   try {
     let k = sessionStorage.getItem("fb_admin_key");
     if (!k) {
-      k = prompt("Masukkan ADMIN_KEY:") || "";
+      k = prompt("Enter ADMIN_KEY:") || "";
       if (k) sessionStorage.setItem("fb_admin_key", k);
     }
     return k || null;
@@ -45,7 +44,7 @@ export default function GalleryPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState<boolean>(false);
 
-  // ---- load data ------------------------------------------------------------
+  // ---- load data
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/gallery", { cache: "no-store" });
@@ -65,12 +64,10 @@ export default function GalleryPage() {
     }
   }, []);
 
-  // ---- derived list ---------------------------------------------------------
+  // ---- derived list
   const filtered = useMemo(() => {
     let list = [...items];
-
     if (onlyMine) list = list.filter((it) => Boolean(myTokens[it.id]));
-
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter((it) => {
@@ -78,17 +75,14 @@ export default function GalleryPage() {
         return s.includes(q);
       });
     }
-
     list.sort((a, b) =>
       sort === "new"
         ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     );
-
     return list;
   }, [items, query, sort, onlyMine, myTokens]);
 
-  // ---- helpers --------------------------------------------------------------
   function xHandle(x?: string) {
     return (x || "").replace(/^@/, "");
   }
@@ -96,14 +90,14 @@ export default function GalleryPage() {
   function discordLink(discord?: string): string | undefined {
     if (!discord) return;
     const v = discord.trim();
-    if (/^https?:\/\//i.test(v)) return v;                 // sudah URL
-    if (/^\d{17,20}$/.test(v)) return `https://discord.com/users/${v}`; // user ID
-    return undefined;                                      // handle biasa
+    if (/^https?:\/\//i.test(v)) return v;
+    if (/^\d{17,20}$/.test(v)) return `https://discord.com/users/${v}`;
+    return undefined;
   }
 
-  // ---- delete ---------------------------------------------------------------
+  // ---- delete
   async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
-    const confirmText = isAdmin ? "Hapus karya ini sebagai ADMIN?" : "Hapus karya ini?";
+    const confirmText = isAdmin ? "Delete this artwork as ADMIN?" : "Delete this artwork?";
     if (!confirm(confirmText)) return;
     setDeleting(id);
 
@@ -113,9 +107,8 @@ export default function GalleryPage() {
 
       if (isAdmin) {
         const adminKey = getAdminKeyFromSession();
-        if (!adminKey) throw new Error("ADMIN_KEY tidak diisi.");
+        if (!adminKey) throw new Error("ADMIN_KEY is missing.");
         if (!metaUrl) throw new Error("Missing token or metaUrl");
-
         headers["x-admin-key"] = adminKey;
         body = { metaUrl };
       } else {
@@ -135,7 +128,7 @@ export default function GalleryPage() {
         throw new Error(data?.error || "Delete failed");
       }
 
-      alert(isAdmin ? "Admin delete success." : "Deleted.");
+      alert(isAdmin ? "Admin delete success." : "Deleted successfully.");
       setItems((prev) => prev.filter((x) => x.id !== id));
 
       if (!isAdmin) {
@@ -153,7 +146,7 @@ export default function GalleryPage() {
     }
   }
 
-  // ---- render ---------------------------------------------------------------
+  // ---- render
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
       {/* Toolbar */}
@@ -226,7 +219,7 @@ export default function GalleryPage() {
       </p>
 
       {filtered.length === 0 ? (
-        <p className="text-white/70">Tidak ada hasil ditemukan.</p>
+        <p className="text-white/70">No results found.</p>
       ) : (
         <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
           {filtered.map((it) => {
@@ -236,7 +229,6 @@ export default function GalleryPage() {
 
             return (
               <div key={it.id} className="glass rounded-2xl p-3 card-hover flex flex-col">
-                {/* Preview gambar (tidak crop) */}
                 <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
                   <img src={it.url} alt={it.title} className="w-full h-full object-contain" />
                 </div>
@@ -245,7 +237,6 @@ export default function GalleryPage() {
                   <h3 className="font-semibold">{it.title}</h3>
 
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {/* X */}
                     {it.x && (
                       <>
                         <button
@@ -267,7 +258,6 @@ export default function GalleryPage() {
                       </>
                     )}
 
-                    {/* Discord */}
                     {it.discord && (
                       <>
                         <button
@@ -307,7 +297,6 @@ export default function GalleryPage() {
                   </div>
                 </div>
 
-                {/* Owner delete */}
                 {mine && (
                   <button
                     onClick={() => onDelete(it.id, it.metaUrl, false)}
@@ -319,7 +308,6 @@ export default function GalleryPage() {
                   </button>
                 )}
 
-                {/* Admin delete kecil (hanya saat Admin Mode ON) */}
                 {ADMIN_UI && adminMode && (
                   <button
                     onClick={() => onDelete(it.id, it.metaUrl, true)}
