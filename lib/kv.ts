@@ -1,3 +1,4 @@
+// lib/kv.ts
 import { Redis } from "@upstash/redis";
 
 const kv = new Redis({
@@ -6,3 +7,4 @@ const kv = new Redis({
 });
 
 export default kv;
+
