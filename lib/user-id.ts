@@ -1,30 +1,21 @@
 // lib/user-id.ts
-import { cookies } from "next/headers";
-import { randomUUID } from "crypto";
+import type { NextRequest } from "next/server";
+import { createHash } from "crypto";
 
 /**
- * Memberi ID unik per browser via cookie httpOnly.
- * Aman dipakai di Route Handlers (server).
+ * Hasilkan ID pseudo-anon untuk user berbasis header (IP + User-Agent).
+ * Parameter `req` opsional, jadi aman dipanggil `getUserId()` atau `getUserId(req)`.
  */
-export function getUserId(): string {
-  const name = "fb_uid";
+export function getUserId(req?: NextRequest): string {
+  const ua = req?.headers.get("user-agent") ?? "";
+  // X-Forwarded-For bisa berisi banyak IP, ambil yang pertama
+  const ipRaw = req?.headers.get("x-forwarded-for") ?? "";
+  const ip = ipRaw.split(",")[0].trim();
 
-  // Baca cookie existing
-  const store = cookies();
-  let uid = store.get(name)?.value;
-
-  // Jika belum ada, buat baru dan set cookie 5 tahun
-  if (!uid) {
-    uid = randomUUID();
-    store.set({
-      name,
-      value: uid,
-      httpOnly: true,
-      sameSite: "lax",
-      secure: true,
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365 * 5, // 5 tahun
-    });
-  }
-  return uid;
+  const seed = `${ip}|${ua}|fairblock-salt`;
+  const hash = createHash("sha256").update(seed).digest("hex");
+  // cukup 32 char agar pendek tapi stabil
+  return hash.slice(0, 32);
 }
+
+export default getUserId;
