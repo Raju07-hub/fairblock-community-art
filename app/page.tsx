@@ -3,17 +3,16 @@ import Link from "next/link";
 
 export default function HomePage() {
   return (
-    // Hero mengisi seluruh tinggi main
     <section
       className="
         min-h-[calc(100vh-8rem)]
         flex flex-col items-center justify-start
         px-5 sm:px-6
-        pt-4 sm:pt-5    /* kecilkan supaya naik */
+        pt-4 sm:pt-5
       "
     >
       <div className="w-full max-w-5xl mx-auto text-center">
-        {/* Judul */}
+        {/* Title */}
         <h1
           className="
             text-gradient
@@ -26,7 +25,7 @@ export default function HomePage() {
           FAIRBLOCK COMMUNITY ART
         </h1>
 
-        {/* By */}
+        {/* Byline */}
         <p className="mt-2 text-sm sm:text-base text-white/70">
           By{" "}
           <a
@@ -39,7 +38,7 @@ export default function HomePage() {
           </a>
         </p>
 
-        {/* Tombol */}
+        {/* Buttons */}
         <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link href="/submit" className="btn w-full sm:w-auto text-base">
             Submit Your Art
@@ -47,9 +46,12 @@ export default function HomePage() {
           <Link href="/gallery" className="btn w-full sm:w-auto text-base">
             View Gallery
           </Link>
+          <Link href="/leaderboard" className="btn w-full sm:w-auto text-base">
+            🏆 Leaderboard
+          </Link>
         </div>
 
-        {/* Maskot */}
+        {/* Mascot */}
         <div className="mt-5 inline-flex rounded-2xl p-2 glass animate-float animate-glow">
           <img
             src="/mascot.webp"

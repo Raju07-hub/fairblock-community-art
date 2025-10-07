@@ -118,4 +118,16 @@ input[type="text"], input[type="search"] {
 :root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
 footer { padding-bottom: max(0px, var(--safe-bottom)); }
 
+/* === Like badge (for heart button on cards) === */
+.badge-like {
+  @apply absolute top-3 right-3 rounded-full bg-white/15 backdrop-blur px-3 py-1
+         flex items-center gap-1 text-sm transition hover:bg-white/25;
+}
+
+/* Active state when user already liked */
+.badge-like[aria-pressed="true"] {
+  @apply bg-pink-500/80 text-white pointer-events-none;
+}
+
+
 

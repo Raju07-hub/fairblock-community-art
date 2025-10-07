@@ -22,6 +22,7 @@ type TokenRec = {
 
 const ADMIN_UI = process.env.NEXT_PUBLIC_ADMIN_UI === "true";
 
+/* -------------------- small utils -------------------- */
 function getAdminKeyFromSession(): string | null {
   try {
     let k = sessionStorage.getItem("fb_admin_key");
@@ -35,6 +36,112 @@ function getAdminKeyFromSession(): string | null {
   }
 }
 
+function getUserId(): string {
+  try {
+    let id = localStorage.getItem("fb_uid");
+    if (!id) {
+      id =
+        globalThis.crypto?.randomUUID?.() ??
+        `u_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem("fb_uid", id);
+    }
+    return id;
+  } catch {
+    return `u_${Date.now()}`;
+  }
+}
+
+function xHandle(x?: string) {
+  return (x || "").replace(/^@/, "");
+}
+
+function discordLink(discord?: string): string | undefined {
+  if (!discord) return;
+  const v = discord.trim();
+  if (/^https?:\/\//i.test(v)) return v;
+  if (/^\d{17,20}$/.test(v)) return `https://discord.com/users/${v}`;
+  return undefined;
+}
+
+/* -------------------- Like Button -------------------- */
+/** Heart-like (no-unlike). Requires /api/likes (GET ?id&user) + (POST {artId,userId}). */
+function LikeButton({ artId }: { artId: string }) {
+  const [count, setCount] = useState<number>(0);
+  const [liked, setLiked] = useState<boolean>(false);
+  const [busy, setBusy] = useState<boolean>(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const uid = getUserId();
+        const r = await fetch(
+          `/api/likes?id=${encodeURIComponent(artId)}&user=${encodeURIComponent(uid)}`,
+          { cache: "no-store" }
+        );
+        const j = await r.json();
+        if (mounted && j?.success) {
+          setCount(j.count || 0);
+          setLiked(Boolean(j.liked));
+        }
+      } catch {}
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [artId]);
+
+  async function onLike() {
+    if (liked || busy) return; // no-unlike
+    setBusy(true);
+    try {
+      const uid = getUserId();
+
+      // optimistic UI
+      setLiked(true);
+      setCount((c) => c + 1);
+
+      const r = await fetch("/api/likes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artId, userId: uid }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j?.success) {
+        // rollback
+        setLiked(false);
+        setCount((c) => Math.max(0, c - 1));
+        alert(j?.error || "Failed to like.");
+      } else if (typeof j.count === "number") {
+        setCount(j.count);
+      }
+    } catch {
+      setLiked(false);
+      setCount((c) => Math.max(0, c - 1));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={onLike}
+      disabled={liked || busy}
+      aria-label="Like"
+      title={liked ? "Liked" : "Like"}
+      className={`absolute top-2 right-2 select-none rounded-full px-3 py-1 text-sm font-medium backdrop-blur bg-white/15 hover:bg-white/25 transition ${
+        liked ? "pointer-events-none opacity-90" : ""
+      }`}
+    >
+      <span className="inline-flex items-center gap-1">
+        <span>{liked ? "❤️" : "🤍"}</span>
+        <span>{count}</span>
+      </span>
+    </button>
+  );
+}
+
+/* -------------------- Page -------------------- */
 export default function GalleryPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [query, setQuery] = useState("");
@@ -82,18 +189,6 @@ export default function GalleryPage() {
     );
     return list;
   }, [items, query, sort, onlyMine, myTokens]);
-
-  function xHandle(x?: string) {
-    return (x || "").replace(/^@/, "");
-  }
-
-  function discordLink(discord?: string): string | undefined {
-    if (!discord) return;
-    const v = discord.trim();
-    if (/^https?:\/\//i.test(v)) return v;
-    if (/^\d{17,20}$/.test(v)) return `https://discord.com/users/${v}`;
-    return undefined;
-  }
 
   // ---- delete
   async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
@@ -154,6 +249,7 @@ export default function GalleryPage() {
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
           <Link href="/submit" className="btn">＋ Submit Art</Link>
+          <Link href="/leaderboard" className="btn">🏆 Leaderboard</Link>
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
@@ -229,14 +325,17 @@ export default function GalleryPage() {
 
             return (
               <div key={it.id} className="glass rounded-2xl p-3 card-hover flex flex-col">
-                <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
+                {/* Preview with like button (absolute) */}
+                <div className="relative w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
                   <img src={it.url} alt={it.title} className="w-full h-full object-contain" />
+                  <LikeButton artId={it.id} />
                 </div>
 
                 <div className="mt-3">
                   <h3 className="font-semibold">{it.title}</h3>
 
                   <div className="flex flex-wrap gap-2 mt-2">
+                    {/* X */}
                     {it.x && (
                       <>
                         <button
@@ -258,6 +357,7 @@ export default function GalleryPage() {
                       </>
                     )}
 
+                    {/* Discord */}
                     {it.discord && (
                       <>
                         <button
@@ -297,6 +397,7 @@ export default function GalleryPage() {
                   </div>
                 </div>
 
+                {/* Owner delete */}
                 {mine && (
                   <button
                     onClick={() => onDelete(it.id, it.metaUrl, false)}
@@ -308,6 +409,7 @@ export default function GalleryPage() {
                   </button>
                 )}
 
+                {/* Admin delete */}
                 {ADMIN_UI && adminMode && (
                   <button
                     onClick={() => onDelete(it.id, it.metaUrl, true)}
