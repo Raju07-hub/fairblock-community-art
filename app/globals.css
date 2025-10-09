@@ -1,14 +1,11 @@
-/* Tailwind v4 */
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* Base */
+/* === Base === */
 html, body, :root { height: 100%; }
 body {
-  min-height: 100vh;
-  background: #000;
-  color: #fff;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  @apply min-h-screen bg-black text-white antialiased;
 }
 
 /* Text Gradient */
@@ -29,29 +26,23 @@ body {
 }
 .animate-glow { animation: glow 3s ease-in-out infinite; }
 
-/* Components */
+/* === Components === */
 @layer components {
-  .btn,
-  button,
-  input[type="submit"],
-  input[type="button"] {
-    @apply px-4 py-2 rounded-full text-sm font-semibold transition ring-1 ring-white/10;
-    background: linear-gradient(135deg, #8A7CFF 0%, #19C3FF 100%);
-    box-shadow: 0 0 20px rgba(138,124,255,.35);
-    color: #fff !important;
+  .btn {
+    @apply px-4 py-2 rounded-full text-sm font-semibold transition ring-1 ring-white/10
+           text-white bg-gradient-to-r from-[#8A7CFF] to-[#19C3FF] shadow-[0_0_20px_rgba(138,124,255,.35)];
   }
-  .btn:hover,
-  button:hover { filter: brightness(1.05); }
+  .btn:hover { filter: brightness(1.05); }
 
   .btn-ghost {
-    @apply px-4 py-2 rounded-full text-sm font-medium transition ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white;
+    @apply px-4 py-2 rounded-full text-sm font-medium transition ring-1 ring-white/10 bg-white/10 hover:bg-white/15 text-white;
   }
 
-  .glass { @apply bg-white/5 backdrop-blur-md ring-1 ring-white/10; }
+  .glass { @apply bg-white/5 backdrop-blur-md ring-1 ring-white/10 rounded-2xl; }
   .card-hover { @apply transition-shadow duration-300; }
   .card-hover:hover { box-shadow: 0 10px 40px rgba(138,124,255,.25); }
 
-  /* Dropzone upload */
+  /* Dropzone */
   .dropzone {
     border: 2px dashed rgba(255,255,255,0.3);
     border-radius: 1rem;
@@ -60,107 +51,29 @@ body {
     cursor: pointer;
     transition: border-color 0.3s ease;
   }
-  .dropzone:hover {
-    border-color: #19C3FF;
-  }
+  .dropzone:hover { border-color: #19C3FF; }
 }
 
-/* Input agar kontras */
+/* Inputs */
 input[type="text"], input[type="search"] {
-  @apply bg-white/10 text-white placeholder-white/60 rounded-full;
+  @apply bg-white/10 text-white placeholder-white/60 rounded-full px-4 py-2;
 }
 
-/* ==== Drag & Drop states ==== */
-.dropzone {
-  position: relative;
-  border: 2px dashed rgba(255,255,255,0.3);
-  border-radius: 1rem;
-  padding: 2rem;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color .25s ease, background-color .25s ease, box-shadow .25s ease;
-}
-.dropzone:hover { border-color: #19C3FF; }
-
-.dropzone--active {
-  border-color: #19C3FF;
-  background: radial-gradient(ellipse at center, rgba(25,195,255,.12), rgba(138,124,255,.08) 40%, transparent 70%);
-  box-shadow: 0 0 30px rgba(25,195,255,.25);
-}
-
-.dropzone__hint {
-  color: rgba(255,255,255,.75);
-  font-size: .95rem;
-}
-.dropzone__sub {
-  color: rgba(255,255,255,.55);
-  font-size: .8rem;
-  margin-top: .35rem;
-}
-
-/* ==== Footer TipMe ==== */
-.footer-tip {
-  @apply flex items-center gap-3 px-3 py-2 rounded-xl;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.footer-tip img {
-  @apply h-10 w-10 rounded-md object-contain;
-  border: 1px solid rgba(255,255,255,0.15);
-}
-
-.footer-tip .addr {
-  @apply text-[10px] text-white/60 hover:text-white/80 text-left;
-}
-
-/* Safe area helper (iOS) */
-:root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
-footer { padding-bottom: max(0px, var(--safe-bottom)); }
-
-/* === Like badge (for heart button on cards) === */
-.badge-like {
-  @apply absolute top-3 right-3 rounded-full bg-white/15 backdrop-blur px-3 py-1
-         flex items-center gap-1 text-sm transition hover:bg-white/25;
-}
-
-/* Active state when user already liked */
-.badge-like[aria-pressed="true"] {
-  @apply bg-pink-500/80 text-white pointer-events-none;
-}
-
-/* --- Like badge (kanan) --- */
+/* Like badge (kanan baris tag) */
 .badge-like-big{
-  @apply inline-flex items-center gap-2 px-3 py-1 rounded-full ring-1 ring-white/10 transition;
-  @apply bg-white/10 text-white hover:bg-white/15;
+  @apply inline-flex items-center gap-1 px-3 py-1 rounded-full ring-1 ring-white/10 transition
+         bg-white/10 text-white hover:bg-white/15;
 }
 .badge-like-big.liked{
   @apply bg-pink-500/80 text-white;
 }
 
-/* --- Burst animation --- */
+/* Burst animation */
 @keyframes like-pop { 0%{ transform: scale(0.6); opacity:0 } 60%{ transform: scale(1.25); opacity:1 } 100%{ transform: scale(1); opacity:0 } }
 @keyframes like-float { 0%{ transform: translateY(0) } 100%{ transform: translateY(-18px) } }
-
 .like-burst { animation: like-float 600ms ease-out forwards; }
 .like-burst-heart { color: #f472b6; fill: currentColor; animation: like-pop 600ms ease-out forwards; }
 
-/* === Like chip (ada di baris tag) === */
-.like-chip {
-  @apply inline-flex items-center gap-1 px-3 py-1 rounded-full ring-1 ring-white/10
-         bg-white/10 text-white hover:bg-white/20 transition;
-}
-.like-chip[aria-pressed="true"] {
-  @apply bg-pink-500/80 text-white;
-}
-.like-chip .heart {
-  @apply w-4 h-4 align-middle;
-  /* saat liked, isi warna */
-}
-.like-chip[aria-pressed="true"] .heart {
-  fill: currentColor;
-}
-
-/* Efek burst kecil saat baru like */
-@keyframes like-pop { 0%{ transform: scale(.6); opacity: .0 } 60%{ transform: scale(1.2); opacity: 1 } 100%{ transform: scale(1); opacity: 0 } }
-.like-pop { animation: like-pop 480ms ease-out; }
+/* Safe area helper (iOS) */
+:root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
+footer { padding-bottom: max(0px, var(--safe-bottom)); }
