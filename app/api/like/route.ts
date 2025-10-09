@@ -55,8 +55,10 @@ export async function POST(req: Request) {
     liked = false;
   }
 
-  return NextResponse.json(
-    { success: true, liked, count },
-    { headers: res.headers, cookies: (res as any).cookies }
-  );
-}
+  return new NextResponse(
+  JSON.stringify({ success: true, liked, count }),
+  {
+    status: 200,
+    headers: res.headers, // masih bawa header cookie
+  }
+);
