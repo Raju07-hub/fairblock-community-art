@@ -2,30 +2,56 @@
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
 
-const Z_ART = "lb:art:all";
-const Z_CREATOR = "lb:creator:all";
+// key ZSET (pastikan sama dengan yang kamu pakai waktu zincrby di /api/like)
+const Z_ART = "lb:art";
+const Z_CREATOR = "lb:creator";
 
-/**
- * GET /api/leaderboard
- * Return top arts & top creators (pakai zrevrange withScores).
- */
+type TopItem = { id: string; score: number };
+
+async function safeZTop(key: string, limit = 20): Promise<TopItem[]> {
+  // Prefer zrange(..., { rev:true, withScores:true }), fallback ke zrevrange
+  // Pakai "any" supaya tidak keganjal tipe di environment yang beda-beda
+  const client: any = kv as any;
+
+  let raw: Array<string | number> = [];
+  if (typeof client.zrange === "function") {
+    // zrange dengan {rev:true, withScores:true} mengembalikan array alternating: [member, score, member, score, ...]
+    raw = (await client.zrange(key, 0, Math.max(0, limit - 1), {
+      rev: true,
+      withScores: true,
+    })) as Array<string | number>;
+  } else if (typeof client.zrevrange === "function") {
+    raw = (await client.zrevrange(key, 0, Math.max(0, limit - 1), {
+      withScores: true,
+    })) as Array<string | number>;
+  } else {
+    // tidak ada API zrange/zrevrange: kosongin aja
+    return [];
+  }
+
+  const out: TopItem[] = [];
+  for (let i = 0; i < raw.length; i += 2) {
+    out.push({ id: String(raw[i]), score: Number(raw[i + 1] ?? 0) });
+  }
+  return out;
+}
+
 export async function GET() {
   try {
-    // zrevrange(..., { withScores: true }) → alternating [member, score, member, score, ...]
-    const rawArts = (await kv.zrevrange(Z_ART, 0, 19, { withScores: true })) as (string | number)[];
-    const topArts: { id: string; score: number }[] = [];
-    for (let i = 0; i < rawArts.length; i += 2) {
-      topArts.push({ id: String(rawArts[i]), score: Number(rawArts[i + 1]) });
-    }
+    const [arts, creators] = await Promise.all([
+      safeZTop(Z_ART, 20),
+      safeZTop(Z_CREATOR, 20),
+    ]);
 
-    const rawCreators = (await kv.zrevrange(Z_CREATOR, 0, 19, { withScores: true })) as (string | number)[];
-    const topCreators: { creator: string; score: number }[] = [];
-    for (let i = 0; i < rawCreators.length; i += 2) {
-      topCreators.push({ creator: String(rawCreators[i]), score: Number(rawCreators[i + 1]) });
-    }
-
-    return NextResponse.json({ success: true, arts: topArts, creators: topCreators });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e?.message || "LB failed" }, { status: 500 });
+    return NextResponse.json({
+      success: true,
+      arts,
+      creators,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { success: false, error: err?.message || "leaderboard failed" },
+      { status: 500 }
+    );
   }
 }
