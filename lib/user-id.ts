@@ -1,12 +1,25 @@
 // lib/user-id.ts
 import { cookies } from "next/headers";
+import type { NextResponse } from "next/server";
 
-const COOKIE_NAME = "fb_uid";
+export const COOKIE_NAME = "fb_uid";
 const ONE_YEAR = 60 * 60 * 24 * 365;
 
-export function getUserIdFromCookies(): string | null {
+function genId(): string {
+  // gunakan Web Crypto kalau ada (Edge-friendly), fallback ke random sederhana
+  const rnd = (globalThis.crypto && "randomUUID" in globalThis.crypto)
+    ? (globalThis.crypto as Crypto).randomUUID()
+    : `uid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return rnd;
+}
+
+/**
+ * Ambil user id dari cookie. Return null kalau tidak ada.
+ * NOTE: cookies() bisa async di Edge runtime ⇒ pakai await.
+ */
+export async function getUserIdFromCookies(): Promise<string | null> {
   try {
-    const c = cookies();
+    const c = await cookies();
     const v = c.get(COOKIE_NAME)?.value;
     return v ?? null;
   } catch {
@@ -14,29 +27,25 @@ export function getUserIdFromCookies(): string | null {
   }
 }
 
-export function ensureUserIdCookie(): string {
-  try {
-    const c = cookies();
-    let v = c.get(COOKIE_NAME)?.value;
-    if (!v) {
-      // gunakan Web Crypto yang tersedia di Edge Runtime
-      const rnd =
-        globalThis.crypto?.randomUUID?.() ??
-        Math.random().toString(36).slice(2);
-      v = `${rnd}-${Date.now().toString(36)}`;
-      c.set({
-        name: COOKIE_NAME,
-        value: v,
-        httpOnly: false, // boleh dibaca client (untuk debug), kalau mau strict set true
-        sameSite: "lax",
-        secure: true,
-        path: "/",
-        maxAge: ONE_YEAR,
-      });
-    }
-    return v;
-  } catch {
-    // fallback kalau cookies() error
-    return Math.random().toString(36).slice(2);
-  }
+/**
+ * Pastikan cookie user id ada. Mengembalikan id yang berlaku (existing atau baru).
+ * Di route handler (Node/Edge), pemanggil bisa memanggil ini lalu
+ * menyetel cookie lewat response bila perlu.
+ */
+export async function ensureUserId(): Promise<string> {
+  const existing = await getUserIdFromCookies();
+  return existing ?? genId();
+}
+
+/**
+ * Helper untuk MENYETEL cookie ke response (dipakai di middleware atau route).
+ * Panggil ini setelah memutuskan id-nya (mis. dari ensureUserId()).
+ */
+export function attachUserIdCookie(res: NextResponse, id: string): void {
+  res.cookies.set(COOKIE_NAME, id, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: ONE_YEAR,
+  });
 }

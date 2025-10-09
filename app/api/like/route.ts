@@ -1,75 +1,37 @@
-// app/api/like/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
-import { getUserIdFromCookies } from "@/lib/user-id";
+import { ensureUserId, attachUserIdCookie } from "@/lib/user-id";
 
-/** ISO week helper: YYYY-Www (UTC) */
-function isoWeekKey(d = new Date()) {
-  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const dayNum = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((date as unknown as number) - (yearStart as unknown as number)) / 86400000 + 1) / 7);
-  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
-}
+export async function POST(req: Request) {
+  const { id, author } = await req.json();
+  if (!id) return NextResponse.json({ success: false, error: "Missing art id" }, { status: 400 });
 
-function makeNowKeys() {
-  const now = new Date();
-  const yyyy = now.getUTCFullYear();
-  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(now.getUTCDate()).padStart(2, "0");
-  const daily = `${yyyy}-${mm}-${dd}`;
-  const weekly = isoWeekKey(now);
-  const monthly = `${yyyy}-${mm}`;
-  return {
-    artDaily: `lb:daily:${daily}`,
-    artWeekly: `lb:weekly:${weekly}`,
-    artMonthly: `lb:monthly:${monthly}`,
-    creatorDaily: `lb:creator:daily:${daily}`,
-    creatorWeekly: `lb:creator:weekly:${weekly}`,
-    creatorMonthly: `lb:creator:monthly:${monthly}`,
-  };
-}
+  // pastikan punya uid
+  const uid = await ensureUserId();
 
-export async function POST(req: NextRequest) {
-  try {
-    const { id, author } = await req.json();
-    if (!id) throw new Error("Missing art id");
+  // logic like…
+  const likedKey = `likes:user:${uid}`;
+  const countKey = `likes:count:${id}`;
+  const already = await kv.sismember(likedKey, id);
 
-    // identitas user per-browser
-    const userId = getUserIdFromCookies();
-    if (!userId) throw new Error("No user cookie");
+  let liked: boolean;
+  let count: number;
 
-    const likedKey = `likes:user:${userId}`; // SET berisi id yang sudah dilike user ini
-    const countKey = `likes:count:${id}`;    // COUNTER total like sebuah art
-
-    const already = await kv.sismember(likedKey, id);
-
-    if (already) {
-      // UNLIKE
-      await kv.srem(likedKey, id);
-      const newCount = await kv.decr(countKey);
-      return NextResponse.json({ success: true, liked: false, count: Number(newCount) });
-    }
-
-    // LIKE
+  if (already) {
+    await kv.srem(likedKey, id);
+    count = await kv.decr(countKey);
+    liked = false;
+  } else {
     await kv.sadd(likedKey, id);
-    const newCount = await kv.incr(countKey);
-
-    // Naikkan skor leaderboard (daily/weekly/monthly + creator)
-    const keys = makeNowKeys();
-    await Promise.all([
-      kv.zincrby(keys.artDaily, 1, id),
-      kv.zincrby(keys.artWeekly, 1, id),
-      kv.zincrby(keys.artMonthly, 1, id),
-      author ? kv.zincrby(keys.creatorDaily, 1, author) : Promise.resolve(),
-      author ? kv.zincrby(keys.creatorWeekly, 1, author) : Promise.resolve(),
-      author ? kv.zincrby(keys.creatorMonthly, 1, author) : Promise.resolve(),
-    ]);
-
-    return NextResponse.json({ success: true, liked: true, count: Number(newCount) });
-  } catch (err: any) {
-    console.error(err);
-    return NextResponse.json({ success: false, error: err?.message || "Like failed" }, { status: 400 });
+    count = await kv.incr(countKey);
+    liked = true;
   }
+
+  const res = NextResponse.json({ success: true, liked, count });
+
+  // kalau uid baru (tidak ada di cookie), set cookie ke response
+  if (!already && typeof uid === "string") {
+    attachUserIdCookie(res, uid);
+  }
+  return res;
 }
