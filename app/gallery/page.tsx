@@ -13,7 +13,6 @@ type Item = {
   url: string;
   createdAt: string;
   metaUrl?: string;
-  // kolom di bawah akan di-patch setelah fetch /api/likes
   likes?: number;
   liked?: boolean;
 };
@@ -48,7 +47,7 @@ export default function GalleryPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState<boolean>(false);
 
-  // ---- load data + load likes sekali
+  // ---- load data + likes pertama kali
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/gallery", { cache: "no-store" });
@@ -57,7 +56,7 @@ export default function GalleryPage() {
         const base: Item[] = json.items || [];
         setItems(base);
 
-        // Ambil likes & status liked untuk semua id sekaligus
+        // Tarik likes & status liked untuk semua id
         try {
           const ids = base.map((i) => i.id).join(",");
           if (ids) {
@@ -72,9 +71,7 @@ export default function GalleryPage() {
               );
             }
           }
-        } catch {
-          // abaikan kalau endpoint belum tersedia
-        }
+        } catch {}
       }
     })();
 
@@ -112,14 +109,6 @@ export default function GalleryPage() {
     return (x || "").replace(/^@/, "");
   }
 
-  function discordLink(discord?: string): string | undefined {
-    if (!discord) return;
-    const v = discord.trim();
-    if (/^https?:\/\//i.test(v)) return v;
-    if (/^\d{17,20}$/.test(v)) return `https://discord.com/users/${v}`;
-    return undefined;
-  }
-
   // ---- delete
   async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
     const confirmText = isAdmin ? "Delete this artwork as ADMIN?" : "Delete this artwork?";
@@ -149,9 +138,7 @@ export default function GalleryPage() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || "Delete failed");
-      }
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Delete failed");
 
       alert(isAdmin ? "Admin delete success." : "Deleted successfully.");
       setItems((prev) => prev.filter((x) => x.id !== id));
@@ -171,7 +158,7 @@ export default function GalleryPage() {
     }
   }
 
-  // ---- handler like untuk ArtworkCard
+  // ---- like handler: return {liked,count} agar card bisa sync angka server
   async function likeOne(id: string) {
     const it = items.find((x) => x.id === id);
     if (!it) throw new Error("Item not found");
@@ -185,10 +172,14 @@ export default function GalleryPage() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.success) throw new Error(j?.error || "Like failed");
 
-    // sinkron kecil di client (optional)
+    // sinkron state global
     setItems((prev) =>
-      prev.map((x) => (x.id === id ? { ...x, liked: Boolean(j.liked), likes: (x.likes || 0) + (j.liked ? 1 : -1) } : x))
+      prev.map((x) =>
+        x.id === id ? { ...x, liked: Boolean(j.liked), likes: Number(j.count ?? (x.likes || 0)) } : x
+      )
     );
+
+    return { liked: Boolean(j.liked), count: Number(j.count ?? 0) };
   }
 
   return (
@@ -268,15 +259,11 @@ export default function GalleryPage() {
       ) : (
         <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
           {filtered.map((it) => {
-            // Jika owner, masih tampilkan tombol delete di bawah kartu
             const mine = Boolean(myTokens[it.id]);
 
             return (
               <div key={it.id} className="flex flex-col">
-                <ArtworkCard
-                  item={it}
-                  onLike={likeOne}
-                />
+                <ArtworkCard item={it} onLike={likeOne} />
 
                 {mine && (
                   <button

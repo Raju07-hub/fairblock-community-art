@@ -18,7 +18,8 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => void | Promise<void>;
+  // onLike sebaiknya mengembalikan { liked:boolean, count:number } untuk sinkron angka
+  onLike: (id: string) => void | Promise<{ liked?: boolean; count?: number } | void>;
 }) {
   const [liked, setLiked] = useState(Boolean(item.liked));
   const [likes, setLikes] = useState(Number(item.likes || 0));
@@ -29,6 +30,7 @@ export default function ArtworkCard({
     if (busy) return;
     setBusy(true);
 
+    // Optimistic UI
     const next = !liked;
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
@@ -38,7 +40,10 @@ export default function ArtworkCard({
     }
 
     try {
-      await onLike(item.id);
+      const res = (await onLike(item.id)) || {};
+      // sinkron dengan angka dari server bila tersedia
+      if (typeof (res as any).count === "number") setLikes((res as any).count);
+      if (typeof (res as any).liked === "boolean") setLiked(Boolean((res as any).liked));
     } catch {
       // rollback jika gagal
       setLiked(!next);
@@ -62,17 +67,17 @@ export default function ArtworkCard({
       {/* Baris tag (kiri) + tombol like (kanan) */}
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {item.x && (
+          {!!item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${item.x?.replace(/^@/, "")}`, "_blank")}
+              onClick={() => window.open(`https://x.com/${item.x!.replace(/^@/, "")}`, "_blank")}
               title="Open X profile"
             >
-              @{item.x.replace(/^@/, "")}
+              @{item.x!.replace(/^@/, "")}
             </button>
           )}
 
-          {item.discord && (
+          {!!item.discord && (
             <button
               onClick={async () => {
                 try {
