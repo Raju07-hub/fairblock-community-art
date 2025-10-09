@@ -1,24 +1,14 @@
-import { NextResponse, NextRequest } from "next/server";
+// middleware.ts
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { ensureUserCookie } from "@/lib/user-id";
 
-const COOKIE = "fb_uid";
-
-export function middleware(req: NextRequest) {
-  const res = NextResponse.next();
-  const has = req.cookies.get(COOKIE)?.value;
-
-  if (!has) {
-    const uid = crypto.randomUUID();
-    res.cookies.set(COOKIE, uid, {
-      httpOnly: false,          // boleh diakses client untuk debug ringan
-      sameSite: "lax",
-      secure: true,
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365 * 5, // 5 tahun
-    });
-  }
-  return res;
+export function middleware(_req: NextRequest) {
+  // pasang cookie identitas jika belum ada
+  ensureUserCookie();
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

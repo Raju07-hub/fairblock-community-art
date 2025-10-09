@@ -1,7 +1,7 @@
 // app/api/like/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import kv from "@/lib/kv";
-import { ensureUserIdCookie } from "@/lib/user-id";
+import { getUserIdFromCookies } from "@/lib/user-id";
 
 /** ISO week helper: YYYY-Www (UTC) */
 function isoWeekKey(d = new Date()) {
@@ -13,7 +13,6 @@ function isoWeekKey(d = new Date()) {
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
-/** Kunci leaderboard harian / mingguan / bulanan */
 function makeNowKeys() {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
@@ -37,22 +36,27 @@ export async function POST(req: NextRequest) {
     const { id, author } = await req.json();
     if (!id) throw new Error("Missing art id");
 
-    const userId = await ensureUserIdCookie();
-    const likedKey = `likes:user:${userId}`;
-    const countKey = `likes:count:${id}`;
+    // identitas user per-browser
+    const userId = getUserIdFromCookies();
+    if (!userId) throw new Error("No user cookie");
 
-    const alreadyLiked = await kv.sismember(likedKey, id);
+    const likedKey = `likes:user:${userId}`; // SET berisi id yang sudah dilike user ini
+    const countKey = `likes:count:${id}`;    // COUNTER total like sebuah art
 
-    if (alreadyLiked) {
+    const already = await kv.sismember(likedKey, id);
+
+    if (already) {
+      // UNLIKE
       await kv.srem(likedKey, id);
       const newCount = await kv.decr(countKey);
       return NextResponse.json({ success: true, liked: false, count: Number(newCount) });
     }
 
+    // LIKE
     await kv.sadd(likedKey, id);
     const newCount = await kv.incr(countKey);
 
-    // Update leaderboard (daily / weekly / monthly)
+    // Naikkan skor leaderboard (daily/weekly/monthly + creator)
     const keys = makeNowKeys();
     await Promise.all([
       kv.zincrby(keys.artDaily, 1, id),
@@ -66,6 +70,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, liked: true, count: Number(newCount) });
   } catch (err: any) {
     console.error(err);
-    return NextResponse.json({ success: false, error: err?.message || "Error" }, { status: 400 });
+    return NextResponse.json({ success: false, error: err?.message || "Like failed" }, { status: 400 });
   }
 }

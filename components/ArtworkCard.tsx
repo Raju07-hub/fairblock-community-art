@@ -1,6 +1,5 @@
 "use client";
-
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Heart } from "lucide-react";
 
 type Artwork = {
@@ -18,21 +17,20 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => void | Promise<void>;
+  onLike: (id: string) => Promise<{ liked: boolean; count: number }>;
 }) {
   const [liked, setLiked] = useState(Boolean(item.liked));
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [burst, setBurst] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // aman buat TS & re-use
-  const xClean = useMemo(() => (item.x ?? "").replace(/^@/, ""), [item.x]);
-
   async function handleLike() {
     if (busy) return;
     setBusy(true);
 
+    // Optimistic
     const next = !liked;
+    const rollbackLikes = likes;
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
     if (next) {
@@ -41,10 +39,14 @@ export default function ArtworkCard({
     }
 
     try {
-      await onLike(item.id);
+      const res = await onLike(item.id);
+      // sinkron dengan angka server agar pas refresh & antar browser konsisten
+      setLiked(res.liked);
+      setLikes(res.count);
     } catch {
+      // rollback bila gagal
       setLiked(!next);
-      setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
+      setLikes(rollbackLikes);
       alert("Failed to like.");
     } finally {
       setBusy(false);
@@ -53,24 +55,21 @@ export default function ArtworkCard({
 
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
-      {/* Gambar */}
       <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
         <img src={item.url} alt={item.title} className="w-full h-full object-contain" />
       </div>
 
-      {/* Judul */}
       <h3 className="mt-3 font-semibold truncate">{item.title}</h3>
 
-      {/* Baris tag (kiri) + tombol like (kanan) */}
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           {item.x ? (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${xClean}`, "_blank")}
+              onClick={() => window.open(`https://x.com/${(item.x || "").replace(/^@/, "")}`, "_blank")}
               title="Open X profile"
             >
-              @{xClean}
+              @{(item.x || "").replace(/^@/, "")}
             </button>
           ) : null}
 
@@ -90,13 +89,13 @@ export default function ArtworkCard({
           )}
         </div>
 
-        {/* Like di kanan, sejajar tag */}
         <div className="relative">
           {burst && (
             <span className="pointer-events-none absolute -top-5 right-1 like-burst">
               <Heart className="w-6 h-6 like-burst-heart" />
             </span>
           )}
+
           <button
             onClick={handleLike}
             disabled={busy}

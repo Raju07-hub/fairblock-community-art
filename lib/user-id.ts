@@ -3,11 +3,12 @@ import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
 
 const COOKIE_NAME = "fb_uid";
+const ONE_YEAR = 60 * 60 * 24 * 365;
 
-/** Ambil userId dari cookies (return null jika belum ada) */
-export async function getUserIdFromCookies(): Promise<string | null> {
+export function getUserIdFromCookies(): string | null {
   try {
-    const c = await cookies(); // <- cookies() adalah Promise
+    // cookies() di Next 15 bersifat sync: langsung pakai
+    const c = cookies();
     const v = c.get(COOKIE_NAME)?.value;
     return v || null;
   } catch {
@@ -15,26 +16,19 @@ export async function getUserIdFromCookies(): Promise<string | null> {
   }
 }
 
-/** Pastikan userId tersedia di cookies; jika belum ada, buat baru dan set. */
-export async function ensureUserIdCookie(): Promise<string> {
+/** Pastikan cookie identitas user ada (dipakai di middleware.ts) */
+export function ensureUserCookie() {
   try {
-    const c = await cookies();
-    const existing = c.get(COOKIE_NAME)?.value;
-    if (existing) return existing;
-
-    const newId = randomUUID();
-    // umur 1 tahun
-    c.set({
-      name: COOKIE_NAME,
-      value: newId,
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365,
-      httpOnly: false, // biar client bisa baca kalau perlu
-      sameSite: "lax",
-    });
-    return newId;
+    const store = cookies();
+    if (!store.get(COOKIE_NAME)?.value) {
+      store.set(COOKIE_NAME, randomUUID(), {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: ONE_YEAR,
+      });
+    }
   } catch {
-    // fallback kalau environment melarang set cookie
-    return randomUUID();
+    // noop
   }
 }
