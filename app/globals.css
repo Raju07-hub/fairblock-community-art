@@ -144,3 +144,23 @@ footer { padding-bottom: max(0px, var(--safe-bottom)); }
 
 .like-burst { animation: like-float 600ms ease-out forwards; }
 .like-burst-heart { color: #f472b6; fill: currentColor; animation: like-pop 600ms ease-out forwards; }
+
+/* === Like chip (ada di baris tag) === */
+.like-chip {
+  @apply inline-flex items-center gap-1 px-3 py-1 rounded-full ring-1 ring-white/10
+         bg-white/10 text-white hover:bg-white/20 transition;
+}
+.like-chip[aria-pressed="true"] {
+  @apply bg-pink-500/80 text-white;
+}
+.like-chip .heart {
+  @apply w-4 h-4 align-middle;
+  /* saat liked, isi warna */
+}
+.like-chip[aria-pressed="true"] .heart {
+  fill: currentColor;
+}
+
+/* Efek burst kecil saat baru like */
+@keyframes like-pop { 0%{ transform: scale(.6); opacity: .0 } 60%{ transform: scale(1.2); opacity: 1 } 100%{ transform: scale(1); opacity: 0 } }
+.like-pop { animation: like-pop 480ms ease-out; }
