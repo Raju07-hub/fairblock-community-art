@@ -5,14 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type TopItem = { id: string; score: number };
-type GalleryItem = {
-  id: string;
-  title: string;
-  url: string;
-  x?: string;
-  discord?: string;
-  createdAt: string;
-};
+type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; createdAt: string; };
 type LbResp = { success: boolean; topArts: TopItem[] };
 
 function handleFromItem(it: GalleryItem): string {
@@ -28,23 +21,22 @@ export default function LeaderboardPage() {
   const [lb, setLb] = useState<LbResp | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
 
-  // 🎨 Brand pill style
-  const pillBase =
-    "inline-flex items-center justify-center rounded-full px-3 py-1 text-xs sm:text-sm font-medium transition shadow-sm";
-  const pillBrand =
-    `${pillBase} bg-gradient-to-r from-[#ff62e4] via-[#ff7ddf] to-[#4af2ff] hover:brightness-110 text-white`;
+  // --- util tombol ---
+  // match exact style tombol "Submit/Gallery" dengan class "btn"
+  const btnCTA = "btn px-4 py-1 rounded-full text-sm";
+  // brand X color
+  const btnX = "inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium transition shadow-sm bg-[#F6AAFF] text-black hover:brightness-110";
 
   async function load(currentRange: "daily" | "weekly") {
     setLoading(true);
     try {
       const r = await fetch(`/api/leaderboard?range=${currentRange}`, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
-      const normalized: LbResp = {
-        success: !!j?.success,
-        topArts: j?.topArts ?? j?.arts ?? [],
-      };
-      const g = await fetch(`/api/gallery`, { cache: "no-store" }).then((res) => res.json());
+      const normalized: LbResp = { success: !!j?.success, topArts: j?.topArts ?? j?.arts ?? [] };
+
+      const g = await fetch(`/api/gallery`, { cache: "no-store" }).then((res) => res.json()).catch(() => ({}));
       const gItems: GalleryItem[] = g?.items ?? [];
+
       setLb(normalized);
       setGallery(gItems);
     } finally {
@@ -52,9 +44,7 @@ export default function LeaderboardPage() {
     }
   }
 
-  useEffect(() => {
-    load(range);
-  }, [range]);
+  useEffect(() => { load(range); }, [range]);
 
   const byId = useMemo(() => {
     const m = new Map<string, GalleryItem>();
@@ -87,11 +77,7 @@ export default function LeaderboardPage() {
           <Link href="/submit" className="btn">＋ Submit</Link>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value as "daily" | "weekly")}
-            className="btn"
-          >
+          <select value={range} onChange={(e) => setRange(e.target.value as "daily" | "weekly")} className="btn">
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
           </select>
@@ -122,9 +108,10 @@ export default function LeaderboardPage() {
                   <div key={t.id + idx} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="w-7 text-center opacity-70">{idx + 1}.</span>
+
                       <div className="w-14 h-14 rounded-lg overflow-hidden bg-white/10 shrink-0">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        {g ? <img src={g.url} alt={g.title} className="w-full h-full object-cover" /> : null}
+                        {g ? <img src={g.url} alt={g.title} className="w-full h-full object-cover" loading="lazy" /> : null}
                       </div>
 
                       <div className="min-w-0">
@@ -133,25 +120,20 @@ export default function LeaderboardPage() {
                           {handle && (
                             <>
                               {" "}<span className="opacity-70">by</span>{" "}
-                              <a
-                                href={xUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="underline text-[#4af2ff] hover:text-[#ff62e4]"
-                              >
+                              <a href={xUrl} target="_blank" rel="noopener noreferrer" className="underline">
                                 {handle}
                               </a>
                             </>
                           )}
                         </div>
 
-                        {/* Hapus UUID di bawah */}
+                        {/* UUID disembunyikan */}
                         {/* <div className="text-xs opacity-60 truncate">{t.id}</div> */}
 
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={seeOnGallery} className={pillBrand}>See on Gallery</Link>
+                          <Link href={seeOnGallery} className={btnCTA}>See on Gallery</Link>
                           {handle && (
-                            <a href={xUrl} target="_blank" rel="noopener noreferrer" className={pillBrand}>
+                            <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btnX}>
                               Open X Profile
                             </a>
                           )}
@@ -159,7 +141,7 @@ export default function LeaderboardPage() {
                       </div>
                     </div>
 
-                    <span className="px-3 py-1 rounded-full bg-gradient-to-r from-[#ff62e4] to-[#4af2ff] text-white text-sm font-semibold">
+                    <span className="px-3 py-1 rounded-full bg-[#F6AAFF] text-black text-sm font-semibold">
                       {t.score}
                     </span>
                   </div>
@@ -185,14 +167,14 @@ export default function LeaderboardPage() {
                         <div className="font-medium truncate">{handle}</div>
                         <div className="text-xs opacity-60">Uploads: {c.score}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={galleryLink} className={pillBrand}>Search on Gallery</Link>
-                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={pillBrand}>
+                          <Link href={galleryLink} className={btnCTA}>Search on Gallery</Link>
+                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btnX}>
                             Open X Profile
                           </a>
                         </div>
                       </div>
                     </div>
-                    <span className="px-3 py-1 rounded-full bg-gradient-to-r from-[#ff62e4] to-[#4af2ff] text-white text-sm font-semibold">
+                    <span className="px-3 py-1 rounded-full bg-[#F6AAFF] text-black text-sm font-semibold">
                       {c.score}
                     </span>
                   </div>
