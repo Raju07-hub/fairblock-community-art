@@ -1,53 +1,62 @@
-// app/api/like/route.ts
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
 import { getUserIdFromCookies, ensureUserIdCookie } from "@/lib/user-id";
 
-const cKey = (id: string) => `likes:count:${id}`;
-const uKey = (uid: string, id: string) => `likes:user:${uid}:${id}`;
+// kunci dasar
+const cKey = (id: string) => `likes:count:${id}`;                // total like per art (number)
+const uKey = (uid: string, id: string) => `likes:user:${uid}:${id}`; // flag like user (number >0 berarti liked)
+
+// leaderboard (opsional, aman kalau belum dipakai)
+const Z_ART = "lb:art"; // leaderboard per-art (global total)
 
 export async function POST(req: Request) {
-  const { id, author } = await req.json().catch(() => ({}));
-  if (!id) {
-    return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
-  }
+  const { id } = await req.json().catch(() => ({} as any));
+  if (!id) return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
 
   const res = NextResponse.json({ success: true } as any);
 
-  // --- pastikan user id (dari cookie)
+  // pastikan ada user id cookie
   let uid = await getUserIdFromCookies();
   if (!uid) uid = await ensureUserIdCookie(res);
 
-  const userFlagKey = uKey(uid, id);
-  const current = (await kv.get(userFlagKey)) as number | null;
-  const already = (current ?? 0) > 0;
+  const userFlagKey = uKey(uid!, id);
 
-  let liked = false;
-  let count = 0;
+  // apakah user sudah like sebelumnya?
+  const current = await kv.get<number | null>(userFlagKey);
+  const alreadyLiked = (current ?? 0) > 0;
 
-  if (already) {
-    // ---- UNLIKE ----
-    const curCount = (await kv.get(cKey(id))) as number | null;
-    const newCount = Math.max(0, Number(curCount ?? 0) - 1);
-    // SDK baru tidak punya set, jadi pakai hset
-    await Promise.all([
-      kv.hset("likes_table", { [id]: newCount }), // simpan semua count dalam 1 hash
-      kv.decr(userFlagKey),
+  let liked: boolean;
+  let count: number;
+
+  if (!alreadyLiked) {
+    // LIKE
+    const [newCount] = await Promise.all([
+      kv.incr(cKey(id)),
+      kv.incr(userFlagKey),
+      kv.zincrby(Z_ART, 1, id).catch(() => 0), // ignore kalau ZSET belum ada/opsional
     ]);
-    liked = false;
-    count = newCount;
-  } else {
-    // ---- LIKE ----
-    const newCount = await kv.incr(cKey(id));
-    await kv.incr(userFlagKey);
+    count = Number(newCount ?? 0);
     liked = true;
-    count = newCount;
+  } else {
+    // UNLIKE (hindari negatif)
+    const currTotal = Number((await kv.get<number | null>(cKey(id))) ?? 0);
+    if (currTotal > 0) {
+      const [afterDecr] = await Promise.all([
+        kv.decr(cKey(id)),
+        kv.decr(userFlagKey),
+        kv.zincrby(Z_ART, -1, id).catch(() => 0),
+      ]);
+      count = Math.max(0, Number(afterDecr ?? 0));
+    } else {
+      // kalau sudah 0, jangan di-decr lagi
+      await kv.decr(userFlagKey).catch(() => 0);
+      count = 0;
+    }
+    liked = false;
   }
 
-  // optional leaderboard (biar tidak error kalau belum ada key)
-  try {
-    await kv.zincrby("lb:arts:all", liked ? 1 : -1, id);
-  } catch {}
-
-  return NextResponse.json({ success: true, id, author, liked, count });
+  return NextResponse.json(
+    { success: true, liked, count },
+    { headers: res.headers, cookies: (res as any).cookies }
+  );
 }

@@ -51,6 +51,7 @@ export default function GalleryPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState<boolean>(false);
 
+  // initial load + tarik likes & liked status dari server
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/gallery", { cache: "no-store" });
@@ -60,15 +61,19 @@ export default function GalleryPage() {
         setItems(base);
 
         try {
-          const ids = base.map(i => i.id).join(",");
+          const ids = base.map((i) => i.id).join(",");
           if (ids) {
-            const r = await fetch(`/api/likes?ids=${encodeURIComponent(ids)}`, { cache: "no-store" });
+            const r = await fetch(`/api/likes?ids=${encodeURIComponent(ids)}`, {
+              cache: "no-store",
+            });
             const j = await r.json();
             if (j?.success && j.data) {
-              setItems(prev =>
-                prev.map(it => {
+              setItems((prev) =>
+                prev.map((it) => {
                   const d = j.data[it.id];
-                  return d ? { ...it, likes: Number(d.count || 0), liked: !!d.liked } : it;
+                  return d
+                    ? { ...it, likes: Number(d.count || 0), liked: !!d.liked }
+                    : it;
                 })
               );
             }
@@ -91,10 +96,10 @@ export default function GalleryPage() {
 
   const filtered = useMemo(() => {
     let list = [...items];
-    if (onlyMine) list = list.filter(it => !!myTokens[it.id]);
+    if (onlyMine) list = list.filter((it) => !!myTokens[it.id]);
     if (query.trim()) {
       const q = query.toLowerCase();
-      list = list.filter(it => {
+      list = list.filter((it) => {
         const s = `${it.title || ""} ${it.x || ""} ${it.discord || ""}`.toLowerCase();
         return s.includes(q);
       });
@@ -139,7 +144,7 @@ export default function GalleryPage() {
       if (!res.ok || !data?.success) throw new Error(data?.error || "Delete failed");
 
       alert(isAdmin ? "Admin delete success." : "Deleted successfully.");
-      setItems(prev => prev.filter(x => x.id !== id));
+      setItems((prev) => prev.filter((x) => x.id !== id));
 
       if (!isAdmin) {
         try {
@@ -156,9 +161,9 @@ export default function GalleryPage() {
     }
   }
 
-  // like handler: sync dengan nilai server (count & liked)
+  // like handler: sync dari server (count & liked)
   async function likeOne(id: string): Promise<void> {
-    const it = items.find(x => x.id === id);
+    const it = items.find((x) => x.id === id);
     if (!it) throw new Error("Item not found");
     const author = xHandle(it.x) || it.discord || "";
 
@@ -170,15 +175,18 @@ export default function GalleryPage() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.success) throw new Error(j?.error || "Like failed");
 
-    setItems(prev =>
-      prev.map(x =>
-        x.id === id ? { ...x, liked: Boolean(j.liked), likes: Number(j.count ?? (x.likes || 0)) } : x
+    setItems((prev) =>
+      prev.map((x) =>
+        x.id === id
+          ? { ...x, liked: Boolean(j.liked), likes: Number(j.count ?? (x.likes || 0)) }
+          : x
       )
     );
   }
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
+      {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
@@ -194,7 +202,12 @@ export default function GalleryPage() {
             onChange={(e) => setQuery(e.target.value)}
             className="px-4 py-2 rounded-full"
           />
-          <select value={sort} onChange={(e) => setSort(e.target.value as "new" | "old")} className="btn">
+
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as "new" | "old")}
+            className="btn"
+          >
             <option value="new">Newest</option>
             <option value="old">Oldest</option>
           </select>

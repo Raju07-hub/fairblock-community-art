@@ -22,7 +22,6 @@ export default function ArtworkCard({
 }) {
   const [liked, setLiked] = useState(!!item.liked);
   const [likes, setLikes] = useState(Number(item.likes || 0));
-  const [burst, setBurst] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function handleLike() {
@@ -32,13 +31,10 @@ export default function ArtworkCard({
     const next = !liked;
     setLiked(next);
     setLikes(n => Math.max(0, n + (next ? 1 : -1)));
-    if (next) {
-      setBurst(true);
-      setTimeout(() => setBurst(false), 600);
-    }
 
     try {
       await onLike(item.id);
+      // angka final akan disinkronkan oleh parent lewat state global (app/gallery/page.tsx)
     } catch {
       // rollback
       setLiked(!next);
@@ -50,8 +46,7 @@ export default function ArtworkCard({
   }
 
   return (
-    <div className="glass rounded-2xl p-3 card-hover flex flex-col relative">
-      {/* Gambar */}
+    <div className="glass rounded-2xl p-3 card-hover flex flex-col">
       <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
         <img src={item.url} alt={item.title} className="w-full h-full object-contain" />
       </div>
@@ -63,13 +58,12 @@ export default function ArtworkCard({
           {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${(item.x ?? "").replace(/^@/, "")}`, "_blank")}
+              onClick={() => window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")}
               title="Open X profile"
             >
-              @{(item.x ?? "").replace(/^@/, "")}
+              @{item.x.replace(/^@/, "")}
             </button>
           )}
-
           {item.discord && (
             <button
               onClick={async () => {
@@ -86,23 +80,16 @@ export default function ArtworkCard({
           )}
         </div>
 
-        <div className="relative">
-          {burst && (
-            <span className="pointer-events-none absolute -top-5 right-1 like-burst">
-              <Heart className="w-6 h-6 like-burst-heart" />
-            </span>
-          )}
-          <button
-            onClick={handleLike}
-            disabled={busy}
-            aria-pressed={liked}
-            className={`badge-like-big ${liked ? "liked" : ""}`}
-            title={liked ? "Unlike" : "Like"}
-          >
-            <Heart className={`w-5 h-5 ${liked ? "fill-current" : ""}`} />
-            <span className="text-sm">{likes}</span>
-          </button>
-        </div>
+        <button
+          onClick={handleLike}
+          disabled={busy}
+          aria-pressed={liked}
+          className={`badge-like-big ${liked ? "liked" : ""}`}
+          title={liked ? "Unlike" : "Like"}
+        >
+          <Heart className={`w-5 h-5 ${liked ? "fill-current" : ""}`} />
+          <span className="text-sm">{likes}</span>
+        </button>
       </div>
     </div>
   );
