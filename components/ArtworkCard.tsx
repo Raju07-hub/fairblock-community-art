@@ -18,18 +18,23 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => Promise<{ liked: boolean; count: number }>;
+  onLike: (id: string) => Promise<void>;
 }) {
   const [liked, setLiked] = useState(Boolean(item.liked));
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [burst, setBurst] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // handler aman untuk link X (menghindari error TS "possibly undefined")
+  const openXProfile = () => {
+    const handle = item.x ? item.x.replace(/^@/, "") : "";
+    if (handle) window.open(`https://x.com/${handle}`, "_blank");
+  };
+
   async function handleLike() {
     if (busy) return;
     setBusy(true);
 
-    // Optimistic kecil
     const next = !liked;
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
@@ -39,11 +44,8 @@ export default function ArtworkCard({
     }
 
     try {
-      const res = await onLike(item.id); // { liked, count } dari server
-      setLiked(res.liked);
-      setLikes(res.count);
+      await onLike(item.id);
     } catch {
-      // rollback kalau gagal
       setLiked(!next);
       setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
@@ -54,21 +56,24 @@ export default function ArtworkCard({
 
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
+      {/* Gambar */}
       <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
         <img src={item.url} alt={item.title} className="w-full h-full object-contain" />
       </div>
 
+      {/* Judul */}
       <h3 className="mt-3 font-semibold truncate">{item.title}</h3>
 
+      {/* Tag kiri + like kanan */}
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")}
+              onClick={openXProfile}
               title="Open X profile"
             >
-              @{item.x.replace(/^@/, "")}
+              @{(item.x ?? "").replace(/^@/, "")}
             </button>
           )}
 
@@ -88,6 +93,7 @@ export default function ArtworkCard({
           )}
         </div>
 
+        {/* Like di kanan */}
         <div className="relative">
           {burst && (
             <span className="pointer-events-none absolute -top-5 right-1 like-burst">
