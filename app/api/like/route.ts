@@ -12,15 +12,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
   }
 
-  // Buat response lebih dulu agar bisa pasang cookie ke response
   const res = NextResponse.json({ success: true } as any);
-
-  // pastikan cookie user
   let uid = await getUserIdFromCookies();
   if (!uid) uid = await ensureUserIdCookie(res);
 
   const userFlagKey = uKey(uid, id);
-  const current = await kv.get(userFlagKey); // number | null
+  const current = await kv.get(userFlagKey); // 🔥 tanpa <number|null>
   const already = (current ?? 0) > 0;
 
   let liked: boolean;
@@ -28,31 +25,23 @@ export async function POST(req: Request) {
 
   if (already) {
     // UNLIKE
-    // jaga agar tidak negatif
-    const curCount = (await kv.get<number | null>(cKey(id))) ?? 0;
-    count = Math.max(0, curCount - 1);
+    const curCount = (await kv.get(cKey(id))) ?? 0; // 🔥 tanpa <number|null>
+    count = Math.max(0, Number(curCount) - 1);
     await Promise.all([
       kv.set(cKey(id), count),
-      kv.decr(userFlagKey), // atau set 0 juga boleh
+      kv.decr(userFlagKey),
     ]);
     liked = false;
   } else {
     // LIKE
-    const newCount = await kv.incr(cKey(id)); // auto-initialize
+    const newCount = await kv.incr(cKey(id));
     await kv.incr(userFlagKey);
     liked = true;
     count = newCount;
   }
 
-  // (opsional) leaderboard per-art
+  // optional leaderboard
   await kv.zincrby("lb:arts:all", liked ? 1 : -1, id).catch(() => {});
 
-  // kembalikan status server
-  res.headers.set("content-type", "application/json");
-  res.body = null; // NextResponse.json sudah set body, jadi kita set lagi via return baru di bawah
-
-  return NextResponse.json(
-    { success: true, liked, count, id, author },
-    { headers: res.headers, cookies: (res as any).cookies }
-  );
+  return NextResponse.json({ success: true, liked, count, id, author });
 }
