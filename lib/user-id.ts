@@ -1,9 +1,9 @@
-import { NextRequest } from "next/server";
+import { cookies } from "next/headers";
 
-/** Ambil anon user id dari cookie yang di-set oleh middleware */
-export function getUserId(req: NextRequest): string {
-  const cookie = req.cookies.get("fb_uid")?.value;
-  if (cookie && typeof cookie === "string" && cookie.length >= 16) return cookie;
-  // fallback super-aman (hampir tak terjadi jika middleware aktif)
-  return "guest-" + Math.random().toString(36).slice(2);
+const COOKIE = "fb_uid";
+
+/** Ambil UID dari cookie; kalau tidak ada, buat sementara (tanpa set cookie di sini). */
+export function getUserIdFromCookies(): string {
+  const uid = cookies().get(COOKIE)?.value;
+  return uid || "anon-" + Math.random().toString(36).slice(2);
 }

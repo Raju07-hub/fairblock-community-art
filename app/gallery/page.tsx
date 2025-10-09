@@ -66,7 +66,12 @@ export default function GalleryPage() {
               setItems((prev) =>
                 prev.map((it) => {
                   const d = lj.data[it.id];
-                  return d ? { ...it, likes: Number(d.count || 0), liked: Boolean(d.liked) } : it;
+                  // fallback liked dari localStorage agar tak hilang saat refresh
+                  let liked = Boolean(d?.liked);
+                  try {
+                    if (!liked && localStorage.getItem(`liked:${it.id}`) === "1") liked = true;
+                  } catch {}
+                  return d ? { ...it, likes: Number(d.count || 0), liked } : it;
                 })
               );
             }
@@ -175,11 +180,13 @@ export default function GalleryPage() {
     // sinkron state global
     setItems((prev) =>
       prev.map((x) =>
-        x.id === id ? { ...x, liked: Boolean(j.liked), likes: Number(j.count ?? (x.likes || 0)) } : x
+        x.id === id ? { ...x, liked: true, likes: Number(j.count ?? (x.likes || 0)) } : x
       )
     );
 
-    return { liked: Boolean(j.liked), count: Number(j.count ?? 0) };
+    try { localStorage.setItem(`liked:${id}`, "1"); } catch {}
+
+    return { liked: true, count: Number(j.count ?? 0) };
   }
 
   return (
