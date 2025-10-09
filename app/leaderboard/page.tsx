@@ -5,14 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type TopItem = { id: string; score: number };
-type GalleryItem = {
-  id: string;
-  title: string;
-  url: string;
-  x?: string;
-  discord?: string;
-  createdAt: string;
-};
+type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; createdAt: string };
 type LbResp = { success: boolean; topArts: TopItem[] };
 
 function handleFromItem(it: GalleryItem): string {
@@ -28,12 +21,9 @@ export default function LeaderboardPage() {
   const [lb, setLb] = useState<LbResp | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
 
-  // ========= BRAND STYLES =========
-  // (Tailwind arbitrary color – gunakan literal agar terscan saat build)
-  const brandBadge = "px-3 py-1 rounded-full bg-[#F6AAFF] text-black text-sm font-semibold";
-  const brandXBtn =
-    "inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium transition shadow-sm bg-[#F6AAFF] text-black hover:brightness-110";
-  const ctaBtn = "btn px-4 py-1 rounded-full text-sm"; // sama seperti tombol Submit/Gallery
+  const btn = "btn px-4 py-1 rounded-full text-sm";
+  const badge = "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
+  const heading = "text-2xl font-bold mb-3 text-[#3aaefc]";
 
   async function load(currentRange: "daily" | "weekly") {
     setLoading(true);
@@ -41,29 +31,17 @@ export default function LeaderboardPage() {
       const r = await fetch(`/api/leaderboard?range=${currentRange}`, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       const normalized: LbResp = { success: !!j?.success, topArts: j?.topArts ?? j?.arts ?? [] };
-
-      const g = await fetch(`/api/gallery`, { cache: "no-store" })
-        .then((res) => res.json())
-        .catch(() => ({}));
-      const gItems: GalleryItem[] = g?.items ?? [];
-
+      const g = await fetch(`/api/gallery`, { cache: "no-store" }).then(res => res.json()).catch(() => ({}));
       setLb(normalized);
-      setGallery(gItems);
+      setGallery(g?.items ?? []);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    load(range);
-  }, [range]);
+  useEffect(() => { load(range); }, [range]);
 
-  const byId = useMemo(() => {
-    const m = new Map<string, GalleryItem>();
-    for (const it of gallery) m.set(it.id, it);
-    return m;
-  }, [gallery]);
-
+  const byId = useMemo(() => new Map(gallery.map(it => [it.id, it])), [gallery]);
   const uploadsByCreator = useMemo(() => {
     const m = new Map<string, number>();
     for (const it of gallery) {
@@ -74,7 +52,7 @@ export default function LeaderboardPage() {
     return m;
   }, [gallery]);
 
-  const topCreatorsFromUploads = useMemo(() => {
+  const topCreators = useMemo(() => {
     const arr = Array.from(uploadsByCreator.entries()).map(([creator, score]) => ({ creator, score }));
     arr.sort((a, b) => b.score - a.score);
     return arr.slice(0, 10);
@@ -89,12 +67,12 @@ export default function LeaderboardPage() {
           <Link href="/submit" className="btn">＋ Submit</Link>
         </div>
         <div className="flex items-center gap-2">
-          <select value={range} onChange={(e) => setRange(e.target.value as "daily" | "weekly")} className="btn">
+          <select value={range} onChange={e => setRange(e.target.value as "daily" | "weekly")} className="btn">
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
           </select>
           <button onClick={() => load(range)} className="btn" disabled={loading}>
-            ↻ {loading ? "Refreshing..." : "Refresh"}
+            ↻ {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </div>
@@ -105,9 +83,9 @@ export default function LeaderboardPage() {
         <p className="text-white/70">Failed to load.</p>
       ) : (
         <div className="grid md:grid-cols-2 gap-6">
-          {/* === Top Art === */}
+          {/* --- Top Art --- */}
           <section>
-            <h2 className="text-2xl font-bold mb-3 text-[#F6AAFF]">🏆 Top Art (Top 10)</h2>
+            <h2 className={heading}>🏆 Top Art (Top 10)</h2>
             <div className="space-y-3">
               {lb.topArts.slice(0, 10).map((t, idx) => {
                 const g = byId.get(t.id);
@@ -117,76 +95,60 @@ export default function LeaderboardPage() {
                 const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
 
                 return (
-                  <div key={t.id + idx} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
+                  <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="w-7 text-center opacity-70">{idx + 1}.</span>
-
                       <div className="w-14 h-14 rounded-lg overflow-hidden bg-white/10 shrink-0">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        {g ? <img src={g.url} alt={g.title} className="w-full h-full object-cover" loading="lazy" /> : null}
+                        {g && <img src={g.url} alt={g.title} className="w-full h-full object-cover" loading="lazy" />}
                       </div>
-
                       <div className="min-w-0">
                         <div className="font-medium truncate">
-                          {g?.title || "Untitled"}
+                          {g?.title || "Untitled"}{" "}
                           {handle && (
                             <>
-                              {" "}<span className="opacity-70">by</span>{" "}
-                              <a href={xUrl} target="_blank" rel="noopener noreferrer" className="underline">
+                              <span className="opacity-70">by</span>{" "}
+                              <a href={xUrl} target="_blank" rel="noopener noreferrer" className="underline text-[#4af2ff]">
                                 {handle}
                               </a>
                             </>
                           )}
                         </div>
-
-                        {/* UUID DISABLED */}
-                        {/* <div className="text-xs opacity-60 truncate">{t.id}</div> */}
-
                         <div className="mt-2 flex flex-wrap gap-2">
-                          {/* sesuai warna tombol Submit/Gallery */}
-                          <Link href={seeOnGallery} className={ctaBtn}>See on Gallery</Link>
-                          {handle && (
-                            <a href={xUrl} target="_blank" rel="noopener noreferrer" className={brandXBtn}>
-                              Open X Profile
-                            </a>
-                          )}
+                          <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
+                          {handle && <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btn}>Open X Profile</a>}
                         </div>
                       </div>
                     </div>
-
-                    <span className={brandBadge}>{t.score}</span>
+                    <span className={badge}>{t.score}</span>
                   </div>
                 );
               })}
             </div>
           </section>
 
-          {/* === Top Creators === */}
+          {/* --- Top Creators --- */}
           <section>
-            <h2 className="text-2xl font-bold mb-3 text-[#F6AAFF]">🧬 Top Creators (Top 10)</h2>
+            <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
             <div className="space-y-3">
-              {topCreatorsFromUploads.map((c, idx) => {
+              {topCreators.map((c, idx) => {
                 const handle = c.creator.startsWith("@") ? c.creator : `@${c.creator}`;
                 const galleryLink = `/gallery?q=${encodeURIComponent(handle)}`;
                 const xUrl = `https://x.com/${handle.replace(/^@/, "")}`;
 
                 return (
-                  <div key={handle + idx} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
+                  <div key={handle} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="w-7 text-center opacity-70">{idx + 1}.</span>
                       <div className="min-w-0">
                         <div className="font-medium truncate">{handle}</div>
                         <div className="text-xs opacity-60">Uploads: {c.score}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          {/* sesuai warna tombol Submit/Gallery */}
-                          <Link href={galleryLink} className={ctaBtn}>Search on Gallery</Link>
-                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={brandXBtn}>
-                            Open X Profile
-                          </a>
+                          <Link href={galleryLink} className={btn}>Search on Gallery</Link>
+                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btn}>Open X Profile</a>
                         </div>
                       </div>
                     </div>
-                    <span className={brandBadge}>{c.score}</span>
+                    <span className={badge}>{c.score}</span>
                   </div>
                 );
               })}
