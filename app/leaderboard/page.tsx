@@ -5,7 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type TopItem = { id: string; score: number };
-type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; createdAt: string; };
+type GalleryItem = {
+  id: string;
+  title: string;
+  url: string;
+  x?: string;
+  discord?: string;
+  createdAt: string;
+};
 type LbResp = { success: boolean; topArts: TopItem[] };
 
 function handleFromItem(it: GalleryItem): string {
@@ -21,11 +28,12 @@ export default function LeaderboardPage() {
   const [lb, setLb] = useState<LbResp | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
 
-  // --- util tombol ---
-  // match exact style tombol "Submit/Gallery" dengan class "btn"
-  const btnCTA = "btn px-4 py-1 rounded-full text-sm";
-  // brand X color
-  const btnX = "inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium transition shadow-sm bg-[#F6AAFF] text-black hover:brightness-110";
+  // ========= BRAND STYLES =========
+  // (Tailwind arbitrary color – gunakan literal agar terscan saat build)
+  const brandBadge = "px-3 py-1 rounded-full bg-[#F6AAFF] text-black text-sm font-semibold";
+  const brandXBtn =
+    "inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium transition shadow-sm bg-[#F6AAFF] text-black hover:brightness-110";
+  const ctaBtn = "btn px-4 py-1 rounded-full text-sm"; // sama seperti tombol Submit/Gallery
 
   async function load(currentRange: "daily" | "weekly") {
     setLoading(true);
@@ -34,7 +42,9 @@ export default function LeaderboardPage() {
       const j = await r.json().catch(() => ({}));
       const normalized: LbResp = { success: !!j?.success, topArts: j?.topArts ?? j?.arts ?? [] };
 
-      const g = await fetch(`/api/gallery`, { cache: "no-store" }).then((res) => res.json()).catch(() => ({}));
+      const g = await fetch(`/api/gallery`, { cache: "no-store" })
+        .then((res) => res.json())
+        .catch(() => ({}));
       const gItems: GalleryItem[] = g?.items ?? [];
 
       setLb(normalized);
@@ -44,7 +54,9 @@ export default function LeaderboardPage() {
     }
   }
 
-  useEffect(() => { load(range); }, [range]);
+  useEffect(() => {
+    load(range);
+  }, [range]);
 
   const byId = useMemo(() => {
     const m = new Map<string, GalleryItem>();
@@ -95,7 +107,7 @@ export default function LeaderboardPage() {
         <div className="grid md:grid-cols-2 gap-6">
           {/* === Top Art === */}
           <section>
-            <h2 className="text-2xl font-bold mb-3">🏆 Top Art (Top 10)</h2>
+            <h2 className="text-2xl font-bold mb-3 text-[#F6AAFF]">🏆 Top Art (Top 10)</h2>
             <div className="space-y-3">
               {lb.topArts.slice(0, 10).map((t, idx) => {
                 const g = byId.get(t.id);
@@ -127,13 +139,14 @@ export default function LeaderboardPage() {
                           )}
                         </div>
 
-                        {/* UUID disembunyikan */}
+                        {/* UUID DISABLED */}
                         {/* <div className="text-xs opacity-60 truncate">{t.id}</div> */}
 
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={seeOnGallery} className={btnCTA}>See on Gallery</Link>
+                          {/* sesuai warna tombol Submit/Gallery */}
+                          <Link href={seeOnGallery} className={ctaBtn}>See on Gallery</Link>
                           {handle && (
-                            <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btnX}>
+                            <a href={xUrl} target="_blank" rel="noopener noreferrer" className={brandXBtn}>
                               Open X Profile
                             </a>
                           )}
@@ -141,9 +154,7 @@ export default function LeaderboardPage() {
                       </div>
                     </div>
 
-                    <span className="px-3 py-1 rounded-full bg-[#F6AAFF] text-black text-sm font-semibold">
-                      {t.score}
-                    </span>
+                    <span className={brandBadge}>{t.score}</span>
                   </div>
                 );
               })}
@@ -152,7 +163,7 @@ export default function LeaderboardPage() {
 
           {/* === Top Creators === */}
           <section>
-            <h2 className="text-2xl font-bold mb-3">🧬 Top Creators (Top 10)</h2>
+            <h2 className="text-2xl font-bold mb-3 text-[#F6AAFF]">🧬 Top Creators (Top 10)</h2>
             <div className="space-y-3">
               {topCreatorsFromUploads.map((c, idx) => {
                 const handle = c.creator.startsWith("@") ? c.creator : `@${c.creator}`;
@@ -167,16 +178,15 @@ export default function LeaderboardPage() {
                         <div className="font-medium truncate">{handle}</div>
                         <div className="text-xs opacity-60">Uploads: {c.score}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={galleryLink} className={btnCTA}>Search on Gallery</Link>
-                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btnX}>
+                          {/* sesuai warna tombol Submit/Gallery */}
+                          <Link href={galleryLink} className={ctaBtn}>Search on Gallery</Link>
+                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={brandXBtn}>
                             Open X Profile
                           </a>
                         </div>
                       </div>
                     </div>
-                    <span className="px-3 py-1 rounded-full bg-[#F6AAFF] text-black text-sm font-semibold">
-                      {c.score}
-                    </span>
+                    <span className={brandBadge}>{c.score}</span>
                   </div>
                 );
               })}
