@@ -158,8 +158,8 @@ export default function GalleryPage() {
     }
   }
 
-  // like handler → kembalikan angka server
-  async function likeOne(id: string) {
+    // ---- like handler (disesuaikan agar return void, bukan object)
+  async function likeOne(id: string): Promise<void> {
     const it = items.find((x) => x.id === id);
     if (!it) throw new Error("Item not found");
     const author = xHandle(it.x) || (it.discord || "");
@@ -172,12 +172,14 @@ export default function GalleryPage() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.success) throw new Error(j?.error || "Like failed");
 
-    // sinkron global
+    // sinkron state global
     setItems((prev) =>
-      prev.map((x) => (x.id === id ? { ...x, liked: !!j.liked, likes: Number(j.count ?? x.likes ?? 0) } : x))
+      prev.map((x) =>
+        x.id === id ? { ...x, liked: Boolean(j.liked), likes: Number(j.count ?? (x.likes || 0)) } : x
+      )
     );
 
-    return { liked: !!j.liked, count: Number(j.count ?? 0) };
+    // tidak return apa pun (biarkan void)
   }
 
   return (
