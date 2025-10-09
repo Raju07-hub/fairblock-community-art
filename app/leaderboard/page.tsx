@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type TopItem = { id: string; score: number };
-
 type GalleryItem = {
   id: string;
   title: string;
@@ -14,11 +13,7 @@ type GalleryItem = {
   discord?: string;
   createdAt: string;
 };
-
-type LbResp = {
-  success: boolean;
-  topArts: TopItem[];
-};
+type LbResp = { success: boolean; topArts: TopItem[] };
 
 function handleFromItem(it: GalleryItem): string {
   const x = (it.x || "").replace(/^@/, "");
@@ -33,38 +28,40 @@ export default function LeaderboardPage() {
   const [lb, setLb] = useState<LbResp | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
 
+  // 🎨 Brand pill style
+  const pillBase =
+    "inline-flex items-center justify-center rounded-full px-3 py-1 text-xs sm:text-sm font-medium transition shadow-sm";
+  const pillBrand =
+    `${pillBase} bg-gradient-to-r from-[#ff62e4] via-[#ff7ddf] to-[#4af2ff] hover:brightness-110 text-white`;
+
+  async function load(currentRange: "daily" | "weekly") {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/leaderboard?range=${currentRange}`, { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      const normalized: LbResp = {
+        success: !!j?.success,
+        topArts: j?.topArts ?? j?.arts ?? [],
+      };
+      const g = await fetch(`/api/gallery`, { cache: "no-store" }).then((res) => res.json());
+      const gItems: GalleryItem[] = g?.items ?? [];
+      setLb(normalized);
+      setGallery(gItems);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        // leaderboard (TOP ART)
-        const r = await fetch(`/api/leaderboard?range=${range}`, { cache: "no-store" });
-        const j = await r.json().catch(() => ({}));
-        const normalized: LbResp = {
-          success: !!j?.success,
-          topArts: j?.topArts ?? j?.arts ?? [],
-        };
-
-        // semua gallery (thumbnail + author handle)
-        const g = await fetch(`/api/gallery`, { cache: "no-store" }).then((res) => res.json()).catch(() => ({}));
-        const gItems: GalleryItem[] = g?.items ?? [];
-
-        setLb(normalized);
-        setGallery(gItems);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    load(range);
   }, [range]);
 
-  // map id -> gallery item
   const byId = useMemo(() => {
     const m = new Map<string, GalleryItem>();
     for (const it of gallery) m.set(it.id, it);
     return m;
   }, [gallery]);
 
-  // uploads per creator (untuk top creators by uploads)
   const uploadsByCreator = useMemo(() => {
     const m = new Map<string, number>();
     for (const it of gallery) {
@@ -76,18 +73,10 @@ export default function LeaderboardPage() {
   }, [gallery]);
 
   const topCreatorsFromUploads = useMemo(() => {
-    const arr = Array.from(uploadsByCreator.entries()).map(([creator, count]) => ({
-      creator,
-      score: count,
-    }));
+    const arr = Array.from(uploadsByCreator.entries()).map(([creator, score]) => ({ creator, score }));
     arr.sort((a, b) => b.score - a.score);
     return arr.slice(0, 10);
   }, [uploadsByCreator]);
-
-  // pill style untuk tombol kecil yang lebih menonjol
-  const pill = "inline-flex items-center px-3 py-1 rounded-full text-xs sm:text-sm transition";
-  const pillMuted = `${pill} bg-white/10 hover:bg-white/20 text-white`;
-  const pillPink  = `${pill} bg-pink-600/20 hover:bg-pink-600/30 text-pink-100`;
 
   return (
     <div className="max-w-6xl mx-auto px-5 sm:px-6 py-10">
@@ -106,7 +95,9 @@ export default function LeaderboardPage() {
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
           </select>
-          <button onClick={() => setRange((r) => r)} className="btn">↻ Refresh</button>
+          <button onClick={() => load(range)} className="btn" disabled={loading}>
+            ↻ {loading ? "Refreshing..." : "Refresh"}
+          </button>
         </div>
       </div>
 
@@ -116,11 +107,11 @@ export default function LeaderboardPage() {
         <p className="text-white/70">Failed to load.</p>
       ) : (
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Top Art */}
+          {/* === Top Art === */}
           <section>
             <h2 className="text-2xl font-bold mb-3">🏆 Top Art (Top 10)</h2>
             <div className="space-y-3">
-              {(lb.topArts ?? []).slice(0, 10).map((t, idx) => {
+              {lb.topArts.slice(0, 10).map((t, idx) => {
                 const g = byId.get(t.id);
                 const handle = g ? handleFromItem(g) : "";
                 const handleNoAt = handle.replace(/^@/, "");
@@ -128,27 +119,17 @@ export default function LeaderboardPage() {
                 const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
 
                 return (
-                  <div
-                    key={t.id + idx}
-                    className="flex items-center justify-between bg-white/5 rounded-xl p-3"
-                  >
+                  <div key={t.id + idx} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="w-7 text-center opacity-70">{idx + 1}.</span>
-
-                      {/* Thumbnail */}
                       <div className="w-14 h-14 rounded-lg overflow-hidden bg-white/10 shrink-0">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        {g ? (
-                          <img src={g.url} alt={g.title} className="w-full h-full object-cover" loading="lazy" />
-                        ) : (
-                          <div className="w-full h-full" />
-                        )}
+                        {g ? <img src={g.url} alt={g.title} className="w-full h-full object-cover" /> : null}
                       </div>
 
-                      {/* Title + by @handle + actions */}
                       <div className="min-w-0">
                         <div className="font-medium truncate">
-                          {g?.title || t.id}
+                          {g?.title || "Untitled"}
                           {handle && (
                             <>
                               {" "}<span className="opacity-70">by</span>{" "}
@@ -156,21 +137,21 @@ export default function LeaderboardPage() {
                                 href={xUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="underline"
-                                onClick={(e) => { if (!xUrl) e.preventDefault(); }}
+                                className="underline text-[#4af2ff] hover:text-[#ff62e4]"
                               >
                                 {handle}
                               </a>
                             </>
                           )}
                         </div>
-                        <div className="text-xs opacity-60 truncate">{t.id}</div>
+
+                        {/* Hapus UUID di bawah */}
+                        {/* <div className="text-xs opacity-60 truncate">{t.id}</div> */}
+
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={seeOnGallery} className={pillPink}>
-                            See on Gallery
-                          </Link>
+                          <Link href={seeOnGallery} className={pillBrand}>See on Gallery</Link>
                           {handle && (
-                            <a href={xUrl} target="_blank" rel="noopener noreferrer" className={pillMuted}>
+                            <a href={xUrl} target="_blank" rel="noopener noreferrer" className={pillBrand}>
                               Open X Profile
                             </a>
                           )}
@@ -178,19 +159,16 @@ export default function LeaderboardPage() {
                       </div>
                     </div>
 
-                    <span className="px-3 py-1 rounded-full bg-pink-600/80 text-white text-sm">
+                    <span className="px-3 py-1 rounded-full bg-gradient-to-r from-[#ff62e4] to-[#4af2ff] text-white text-sm font-semibold">
                       {t.score}
                     </span>
                   </div>
                 );
               })}
-              {(lb.topArts ?? []).length === 0 && (
-                <div className="text-white/60">No results yet.</div>
-              )}
             </div>
           </section>
 
-          {/* Top Creators – by uploads */}
+          {/* === Top Creators === */}
           <section>
             <h2 className="text-2xl font-bold mb-3">🧬 Top Creators (Top 10)</h2>
             <div className="space-y-3">
@@ -200,34 +178,26 @@ export default function LeaderboardPage() {
                 const xUrl = `https://x.com/${handle.replace(/^@/, "")}`;
 
                 return (
-                  <div
-                    key={handle + idx}
-                    className="flex items-center justify-between bg-white/5 rounded-xl p-3"
-                  >
+                  <div key={handle + idx} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="w-7 text-center opacity-70">{idx + 1}.</span>
                       <div className="min-w-0">
                         <div className="font-medium truncate">{handle}</div>
                         <div className="text-xs opacity-60">Uploads: {c.score}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={galleryLink} className={pillPink}>
-                            Search on Gallery
-                          </Link>
-                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={pillMuted}>
+                          <Link href={galleryLink} className={pillBrand}>Search on Gallery</Link>
+                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={pillBrand}>
                             Open X Profile
                           </a>
                         </div>
                       </div>
                     </div>
-                    <span className="px-3 py-1 rounded-full bg-pink-600/80 text-white text-sm">
+                    <span className="px-3 py-1 rounded-full bg-gradient-to-r from-[#ff62e4] to-[#4af2ff] text-white text-sm font-semibold">
                       {c.score}
                     </span>
                   </div>
                 );
               })}
-              {topCreatorsFromUploads.length === 0 && (
-                <div className="text-white/60">No creators yet.</div>
-              )}
             </div>
           </section>
         </div>
