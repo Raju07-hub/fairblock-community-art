@@ -10,35 +10,44 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const idsStr = searchParams.get("ids") || "";
   const ids = idsStr.split(",").map(s => s.trim()).filter(Boolean);
-  if (!ids.length) {
+
+  if (ids.length === 0) {
     return NextResponse.json({ success: true, data: {} });
   }
 
-  const res = NextResponse.json({ success: true } as any);
-
-  // pastikan cookie user
+  // --- identitas user dari cookie (untuk flag "liked")
   let uid = await getUserIdFromCookies();
-  if (!uid) uid = await ensureUserIdCookie(res);
 
-  // ambil counts batch
-  const countKeys = ids.map(id => cKey(id));
-  const counts = await kv.mget<number | null>(...countKeys); // (number|null)[]
+  // --- ambil counts (batch)
+  const countKeys = ids.map((id) => cKey(id));
+  const counts = (await kv.mget(...countKeys)) as (number | null)[];
 
-  // cek liked per id (paralel biar cepat)
+  // --- susun data dan baca flag liked per-art
   const data: Record<string, { count: number; liked: boolean }> = {};
   await Promise.all(
     ids.map(async (id, idx) => {
-      const cnt = counts[idx] ?? 0;
-      const uf = await kv.get<number | null>(uKey(uid!, id));
+      const rawCount = counts[idx] ?? 0;
+      let liked = false;
+
+      if (uid) {
+        const uf = (await kv.get(uKey(uid, id))) as number | null;
+        liked = Number(uf ?? 0) > 0;
+      }
+
       data[id] = {
-        count: cnt,
-        liked: (uf ?? 0) > 0,
+        count: Number(rawCount ?? 0),
+        liked,
       };
     })
   );
 
-  return NextResponse.json(
-    { success: true, data },
-    { headers: res.headers, cookies: (res as any).cookies }
-  );
+  // --- bentuk response
+  const res = NextResponse.json({ success: true, data });
+
+  // kalau belum ada uid, pasang cookie sekarang di response
+  if (!uid) {
+    await ensureUserIdCookie(res);
+  }
+
+  return res;
 }
