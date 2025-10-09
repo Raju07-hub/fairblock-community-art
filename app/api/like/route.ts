@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import kv from "@/lib/kv";
-import { ensureUserIdCookie } from "@/lib/user-id";
+import { getUserIdFromCookies } from "@/lib/user-id";
 
-/** ISO week helper: YYYY-Www (UTC) */
 function isoWeekKey(d = new Date()) {
   const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   const dayNum = date.getUTCDay() || 7;
@@ -11,7 +10,6 @@ function isoWeekKey(d = new Date()) {
   const weekNo = Math.ceil((((date as unknown as number) - (yearStart as unknown as number)) / 86400000 + 1) / 7);
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
-
 function makeNowKeys() {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
@@ -35,8 +33,7 @@ export async function POST(req: NextRequest) {
     const { id, author } = await req.json();
     if (!id) throw new Error("Missing art id");
 
-    // pastikan cookie user-id ada (await!)
-    const userId = await ensureUserIdCookie();
+    const userId = await getUserIdFromCookies();
     const likedKey = `likes:user:${userId}`;
     const countKey = `likes:count:${id}`;
 
@@ -44,31 +41,24 @@ export async function POST(req: NextRequest) {
 
     if (already) {
       await Promise.all([kv.srem(likedKey, id), kv.decr(countKey)]);
-      const count = Number((await kv.get<number>(countKey)) || 0);
-      return NextResponse.json({ success: true, liked: false, count });
+    } else {
+      await Promise.all([kv.sadd(likedKey, id), kv.incr(countKey)]);
+      const keys = makeNowKeys();
+      await Promise.all([
+        kv.zincrby(keys.artDaily, 1, id),
+        kv.zincrby(keys.artWeekly, 1, id),
+        kv.zincrby(keys.artMonthly, 1, id),
+        author ? kv.zincrby(keys.creatorDaily, 1, author) : Promise.resolve(),
+        author ? kv.zincrby(keys.creatorWeekly, 1, author) : Promise.resolve(),
+        author ? kv.zincrby(keys.creatorMonthly, 1, author) : Promise.resolve(),
+      ]);
     }
 
-    await Promise.all([kv.sadd(likedKey, id), kv.incr(countKey)]);
+    const countRaw = await kv.get<string | number>(countKey);
+    const count = Number(countRaw ?? 0);
 
-    const keys = makeNowKeys();
-    const incs: Promise<any>[] = [
-      kv.zincrby(keys.artDaily, 1, id),
-      kv.zincrby(keys.artWeekly, 1, id),
-      kv.zincrby(keys.artMonthly, 1, id),
-    ];
-    if (author) {
-      incs.push(
-        kv.zincrby(keys.creatorDaily, 1, author),
-        kv.zincrby(keys.creatorWeekly, 1, author),
-        kv.zincrby(keys.creatorMonthly, 1, author),
-      );
-    }
-    await Promise.all(incs);
-
-    const count = Number((await kv.get<number>(countKey)) || 0);
-    return NextResponse.json({ success: true, liked: true, count });
-  } catch (err: any) {
-    console.error(err);
-    return NextResponse.json({ success: false, error: err?.message || "Like failed" }, { status: 400 });
+    return NextResponse.json({ success: true, liked: !already, count });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e?.message || "error" }, { status: 400 });
   }
 }

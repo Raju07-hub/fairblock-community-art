@@ -47,7 +47,7 @@ export default function GalleryPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState<boolean>(false);
 
-  // ---- load data + likes pertama kali
+  // initial load
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/gallery", { cache: "no-store" });
@@ -56,22 +56,17 @@ export default function GalleryPage() {
         const base: Item[] = json.items || [];
         setItems(base);
 
-        // Tarik likes & status liked untuk semua id
+        // Isi jumlah like & status liked dari server
         try {
           const ids = base.map((i) => i.id).join(",");
           if (ids) {
-            const lr = await fetch(`/api/likes?ids=${encodeURIComponent(ids)}`, { cache: "no-store" });
-            const lj = await lr.json();
-            if (lj?.success && lj.data) {
+            const r = await fetch(`/api/likes?ids=${encodeURIComponent(ids)}`, { cache: "no-store" });
+            const j = await r.json();
+            if (j?.success && j.data) {
               setItems((prev) =>
                 prev.map((it) => {
-                  const d = lj.data[it.id];
-                  // fallback liked dari localStorage agar tak hilang saat refresh
-                  let liked = Boolean(d?.liked);
-                  try {
-                    if (!liked && localStorage.getItem(`liked:${it.id}`) === "1") liked = true;
-                  } catch {}
-                  return d ? { ...it, likes: Number(d.count || 0), liked } : it;
+                  const d = j.data[it.id];
+                  return d ? { ...it, likes: Number(d.count || 0), liked: !!d.liked } : it;
                 })
               );
             }
@@ -94,7 +89,7 @@ export default function GalleryPage() {
 
   const filtered = useMemo(() => {
     let list = [...items];
-    if (onlyMine) list = list.filter((it) => Boolean(myTokens[it.id]));
+    if (onlyMine) list = list.filter((it) => !!myTokens[it.id]);
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter((it) => {
@@ -114,7 +109,7 @@ export default function GalleryPage() {
     return (x || "").replace(/^@/, "");
   }
 
-  // ---- delete
+  // delete
   async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
     const confirmText = isAdmin ? "Delete this artwork as ADMIN?" : "Delete this artwork?";
     if (!confirm(confirmText)) return;
@@ -163,7 +158,7 @@ export default function GalleryPage() {
     }
   }
 
-  // ---- like handler: return {liked,count} agar card bisa sync angka server
+  // like handler → kembalikan angka server
   async function likeOne(id: string) {
     const it = items.find((x) => x.id === id);
     if (!it) throw new Error("Item not found");
@@ -177,16 +172,12 @@ export default function GalleryPage() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.success) throw new Error(j?.error || "Like failed");
 
-    // sinkron state global
+    // sinkron global
     setItems((prev) =>
-      prev.map((x) =>
-        x.id === id ? { ...x, liked: true, likes: Number(j.count ?? (x.likes || 0)) } : x
-      )
+      prev.map((x) => (x.id === id ? { ...x, liked: !!j.liked, likes: Number(j.count ?? x.likes ?? 0) } : x))
     );
 
-    try { localStorage.setItem(`liked:${id}`, "1"); } catch {}
-
-    return { liked: true, count: Number(j.count ?? 0) };
+    return { liked: !!j.liked, count: Number(j.count ?? 0) };
   }
 
   return (
@@ -202,17 +193,12 @@ export default function GalleryPage() {
         <div className="flex flex-wrap gap-3 items-center">
           <input
             type="search"
-            placeholder="Search title / @x / discord…"
+            placeholder="Search title / @x / discc…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="px-4 py-2 rounded-full"
           />
-
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as "new" | "old")}
-            className="btn"
-          >
+          <select value={sort} onChange={(e) => setSort(e.target.value as "new" | "old")} className="btn">
             <option value="new">Newest</option>
             <option value="old">Oldest</option>
           </select>
@@ -255,7 +241,7 @@ export default function GalleryPage() {
 
       <h1 className="text-3xl font-bold text-gradient mb-2">Gallery</h1>
       <p className="text-white/60 mb-6">
-        {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+        {filtered.length} result{filtered.length !== 1 ? "s" : ""}{" "}
         {ADMIN_UI && adminMode && <span className="ml-2">• <b>Admin Mode ON</b></span>}
         {onlyMine && <span className="ml-2">• showing <b>my uploads</b></span>}
         {query && <span className="ml-2">• for <span className="text-gradient">{query}</span></span>}
@@ -266,12 +252,10 @@ export default function GalleryPage() {
       ) : (
         <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
           {filtered.map((it) => {
-            const mine = Boolean(myTokens[it.id]);
-
+            const mine = !!myTokens[it.id];
             return (
               <div key={it.id} className="flex flex-col">
                 <ArtworkCard item={it} onLike={likeOne} />
-
                 {mine && (
                   <button
                     onClick={() => onDelete(it.id, it.metaUrl, false)}

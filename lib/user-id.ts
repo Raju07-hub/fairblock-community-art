@@ -1,33 +1,26 @@
-// lib/user-id.ts
-import { cookies } from "next/headers";
+import { cookies as nextCookies } from "next/headers";
 import { randomUUID } from "crypto";
 
-const COOKIE_NAME = "fb_uid";
-const MAX_AGE = 60 * 60 * 24 * 365 * 5; // 5 tahun
+export const COOKIE_NAME = "fb_uid";
 
-/** Ambil user id dari cookie; jika belum ada, return null */
-export async function getUserIdFromCookies(): Promise<string | null> {
+export async function getUserIdFromCookies(): Promise<string> {
   try {
-    const c = await cookies();
-    return c.get(COOKIE_NAME)?.value || null;
-  } catch {
-    return null;
-  }
-}
+    const c = await nextCookies();
+    const v = c.get(COOKIE_NAME)?.value;
+    if (v) return v;
 
-/** Pastikan cookie user id ada; kalau belum ada, set sekarang lalu return id */
-export async function ensureUserIdCookie(): Promise<string> {
-  const c = await cookies();
-  let id = c.get(COOKIE_NAME)?.value;
-  if (!id) {
-    id = randomUUID();
+    const id = randomUUID();
+    // cookie 180 hari, path=/, sameSite=Lax
     c.set(COOKIE_NAME, id, {
-      httpOnly: true,
+      httpOnly: false,
       sameSite: "lax",
-      secure: true,
       path: "/",
-      maxAge: MAX_AGE,
+      secure: true,
+      maxAge: 60 * 60 * 24 * 180,
     });
+    return id;
+  } catch {
+    // fallback jika header cookies tidak tersedia
+    return randomUUID();
   }
-  return id;
 }

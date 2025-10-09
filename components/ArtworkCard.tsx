@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Heart } from "lucide-react";
 
 type Artwork = {
@@ -18,42 +18,35 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => Promise<{ liked?: boolean; count?: number } | void> | void;
+  onLike: (id: string) => Promise<{ liked: boolean; count: number }>;
 }) {
-  // inisialisasi dari server + fallback localStorage agar tak “hilang” saat reload
-  const [liked, setLiked] = useState(Boolean(item.liked));
-  const [likes, setLikes] = useState(Number(item.likes || 0));
+  const [liked, setLiked] = useState(!!item.liked);
+  const [likes, setLikes] = useState(Number(item.likes ?? 0));
   const [burst, setBurst] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    try {
-      if (!liked) {
-        const l = localStorage.getItem(`liked:${item.id}`) === "1";
-        if (l) setLiked(true);
-      }
-    } catch {}
-  }, [item.id, liked]);
-
   async function handleLike() {
-    if (busy || liked) return;   // 1 like per browser (no toggle back)
+    if (busy) return;
     setBusy(true);
 
     // Optimistic
-    setLiked(true);
-    setLikes((n) => n + 1);
-    setBurst(true);
-    setTimeout(() => setBurst(false), 600);
+    const next = !liked;
+    setLiked(next);
+    setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
+    if (next) {
+      setBurst(true);
+      setTimeout(() => setBurst(false), 600);
+    }
 
     try {
-      const res = (await onLike(item.id)) || {};
-      if (typeof (res as any).count === "number") setLikes((res as any).count);
-      if (typeof (res as any).liked === "boolean") setLiked(Boolean((res as any).liked));
-      try { localStorage.setItem(`liked:${item.id}`, "1"); } catch {}
+      // HARUS mengacu ke angka dari server agar persist saat refresh
+      const r = await onLike(item.id);
+      setLiked(r.liked);
+      setLikes(r.count);
     } catch {
-      // rollback kalau gagal
-      setLiked(false);
-      setLikes((n) => Math.max(0, n - 1));
+      // rollback jika gagal
+      setLiked(!next);
+      setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
     } finally {
       setBusy(false);
@@ -62,27 +55,33 @@ export default function ArtworkCard({
 
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
+      {/* Gambar */}
       <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
         <img src={item.url} alt={item.title} className="w-full h-full object-contain" />
       </div>
 
+      {/* Judul */}
       <h3 className="mt-3 font-semibold truncate">{item.title}</h3>
 
+      {/* Baris tag (kiri) + tombol like (kanan) */}
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {!!item.x && (
+          {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${item.x!.replace(/^@/, "")}`, "_blank")}
+              onClick={() => window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")}
               title="Open X profile"
             >
-              @{item.x!.replace(/^@/, "")}
+              @{item.x.replace(/^@/, "")}
             </button>
           )}
-          {!!item.discord && (
+          {item.discord && (
             <button
               onClick={async () => {
-                try { await navigator.clipboard.writeText(item.discord!); alert("Discord handle copied."); } catch {}
+                try {
+                  await navigator.clipboard.writeText(item.discord!);
+                  alert("Discord handle copied.");
+                } catch {}
               }}
               className="btn-ghost text-sm px-3 py-1 underline"
               title="Copy Discord handle"
@@ -92,6 +91,7 @@ export default function ArtworkCard({
           )}
         </div>
 
+        {/* Like di kanan, sejajar tag */}
         <div className="relative">
           {burst && (
             <span className="pointer-events-none absolute -top-5 right-1 like-burst">
@@ -100,10 +100,10 @@ export default function ArtworkCard({
           )}
           <button
             onClick={handleLike}
-            disabled={busy || liked}
+            disabled={busy}
             aria-pressed={liked}
             className={`badge-like-big ${liked ? "liked" : ""}`}
-            title={liked ? "Liked" : "Like"}
+            title={liked ? "Unlike" : "Like"}
           >
             <Heart className={`w-5 h-5 ${liked ? "fill-current" : ""}`} />
             <span className="text-sm">{likes}</span>

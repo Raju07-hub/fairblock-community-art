@@ -2,32 +2,33 @@ import { NextRequest, NextResponse } from "next/server";
 import kv from "@/lib/kv";
 import { getUserIdFromCookies } from "@/lib/user-id";
 
-/** GET /api/likes?ids=id1,id2,... => { success, data: { [id]: { count, liked } } } */
+/** GET /api/likes?ids=id1,id2,id3 */
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const idsParam = searchParams.get("ids") || "";
-    const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
-    if (ids.length === 0) return NextResponse.json({ success: true, data: {} });
+    const ids = (req.nextUrl.searchParams.get("ids") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (ids.length === 0) {
+      return NextResponse.json({ success: true, data: {} });
+    }
 
     const userId = await getUserIdFromCookies();
-    const likedKey = userId ? `likes:user:${userId}` : null;
+    const likedKey = `likes:user:${userId}`;
 
-    const out: Record<string, { count: number; liked: boolean }> = {};
-
-    await Promise.all(
-      ids.map(async (id) => {
-        const [countRaw, likedRaw] = await Promise.all([
-          kv.get<number>(`likes:count:${id}`),
-          likedKey ? kv.sismember(likedKey, id) : Promise.resolve(false),
-        ]);
-        out[id] = { count: Number(countRaw || 0), liked: Boolean(likedRaw) };
-      })
+    const counts = await Promise.all(
+      ids.map((id) => kv.get<string | number>(`likes:count:${id}`))
     );
+    const likedFlags = await Promise.all(ids.map((id) => kv.sismember(likedKey, id)));
 
-    return NextResponse.json({ success: true, data: out });
-  } catch (err: any) {
-    console.error(err);
-    return NextResponse.json({ success: false, error: err?.message || "Failed to fetch likes" }, { status: 400 });
+    const data: Record<string, { count: number; liked: boolean }> = {};
+    ids.forEach((id, i) => {
+      data[id] = { count: Number(counts[i] ?? 0), liked: !!likedFlags[i] };
+    });
+
+    return NextResponse.json({ success: true, data });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e?.message || "error" }, { status: 400 });
   }
 }
