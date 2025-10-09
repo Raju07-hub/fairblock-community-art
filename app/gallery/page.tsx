@@ -56,7 +56,7 @@ export default function GalleryPage() {
         const base: Item[] = json.items || [];
         setItems(base);
 
-        // Isi jumlah like & status liked dari server
+        // Hydrate jumlah like & status liked dari server
         try {
           const ids = base.map((i) => i.id).join(",");
           if (ids) {
@@ -138,7 +138,9 @@ export default function GalleryPage() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success) throw new Error(data?.error || "Delete failed");
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "Delete failed");
+      }
 
       alert(isAdmin ? "Admin delete success." : "Deleted successfully.");
       setItems((prev) => prev.filter((x) => x.id !== id));
@@ -158,8 +160,8 @@ export default function GalleryPage() {
     }
   }
 
-    // ---- like handler (disesuaikan agar return void, bukan object)
-  async function likeOne(id: string): Promise<void> {
+  // like handler -> return { liked, count } untuk disinkron ke card
+  async function likeOne(id: string): Promise<{ liked: boolean; count: number }> {
     const it = items.find((x) => x.id === id);
     if (!it) throw new Error("Item not found");
     const author = xHandle(it.x) || (it.discord || "");
@@ -169,17 +171,17 @@ export default function GalleryPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, author }),
     });
-    const j = await r.json().catch(() => ({}));
+    const j = await r.json().catch(() => ({} as any));
     if (!r.ok || !j?.success) throw new Error(j?.error || "Like failed");
 
-    // sinkron state global
+    const payload = { liked: !!j.liked, count: Number(j.count ?? 0) };
+
+    // sinkron state global berdasarkan angka server
     setItems((prev) =>
-      prev.map((x) =>
-        x.id === id ? { ...x, liked: Boolean(j.liked), likes: Number(j.count ?? (x.likes || 0)) } : x
-      )
+      prev.map((x) => (x.id === id ? { ...x, liked: payload.liked, likes: payload.count } : x))
     );
 
-    // tidak return apa pun (biarkan void)
+    return payload;
   }
 
   return (
@@ -195,7 +197,7 @@ export default function GalleryPage() {
         <div className="flex flex-wrap gap-3 items-center">
           <input
             type="search"
-            placeholder="Search title / @x / discc…"
+            placeholder="Search title / @x / discord…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="px-4 py-2 rounded-full"

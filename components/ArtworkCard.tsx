@@ -1,4 +1,5 @@
 "use client";
+
 import { useState } from "react";
 import { Heart } from "lucide-react";
 
@@ -28,9 +29,8 @@ export default function ArtworkCard({
     if (busy) return;
     setBusy(true);
 
-    // Optimistic
+    // Optimistic kecil
     const next = !liked;
-    const rollbackLikes = likes;
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
     if (next) {
@@ -39,14 +39,13 @@ export default function ArtworkCard({
     }
 
     try {
-      const res = await onLike(item.id);
-      // sinkron dengan angka server agar pas refresh & antar browser konsisten
+      const res = await onLike(item.id); // { liked, count } dari server
       setLiked(res.liked);
       setLikes(res.count);
     } catch {
-      // rollback bila gagal
+      // rollback kalau gagal
       setLiked(!next);
-      setLikes(rollbackLikes);
+      setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
     } finally {
       setBusy(false);
@@ -63,15 +62,15 @@ export default function ArtworkCard({
 
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {item.x ? (
+          {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${(item.x || "").replace(/^@/, "")}`, "_blank")}
+              onClick={() => window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")}
               title="Open X profile"
             >
-              @{(item.x || "").replace(/^@/, "")}
+              @{item.x.replace(/^@/, "")}
             </button>
-          ) : null}
+          )}
 
           {item.discord && (
             <button
@@ -95,7 +94,6 @@ export default function ArtworkCard({
               <Heart className="w-6 h-6 like-burst-heart" />
             </span>
           )}
-
           <button
             onClick={handleLike}
             disabled={busy}
