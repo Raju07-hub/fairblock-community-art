@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
 
 type Artwork = {
@@ -24,21 +24,28 @@ export default function ArtworkCard({
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [busy, setBusy] = useState(false);
 
+  // Sinkronkan state lokal jika parent mengirim prop baru (mis. setelah refresh / re-fetch)
+  useEffect(() => {
+    setLiked(!!item.liked);
+    setLikes(Number(item.likes || 0));
+  }, [item.liked, item.likes, item.id]);
+
   async function handleLike() {
     if (busy) return;
     setBusy(true);
 
     const next = !liked;
+    // Optimistic update
     setLiked(next);
-    setLikes(n => Math.max(0, n + (next ? 1 : -1)));
+    setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
 
     try {
       await onLike(item.id);
-      // angka final akan disinkronkan oleh parent lewat state global (app/gallery/page.tsx)
+      // Parent akan menyamakan angka dari server; useEffect di atas akan menyetel ulang bila ada perubahan.
     } catch {
-      // rollback
+      // rollback kalau gagal
       setLiked(!next);
-      setLikes(n => Math.max(0, n + (next ? -1 : 1)));
+      setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
     } finally {
       setBusy(false);
@@ -48,7 +55,19 @@ export default function ArtworkCard({
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
       <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
-        <img src={item.url} alt={item.title} className="w-full h-full object-contain" />
+        {/* fallback kecil kalau img gagal */}
+        <img
+          src={item.url}
+          alt={item.title}
+          className="w-full h-full object-contain"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src =
+              "data:image/svg+xml;charset=utf-8," +
+              encodeURIComponent(
+                `<svg xmlns='http://www.w3.org/2000/svg' width='600' height='400'><rect width='100%' height='100%' fill='#111'/><text x='50%' y='50%' fill='#bbb' dy='.3em' font-family='sans-serif' font-size='20' text-anchor='middle'>Image not available</text></svg>`
+              );
+          }}
+        />
       </div>
 
       <h3 className="mt-3 font-semibold truncate">{item.title}</h3>
@@ -58,7 +77,9 @@ export default function ArtworkCard({
           {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")}
+              onClick={() =>
+                window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")
+              }
               title="Open X profile"
             >
               @{item.x.replace(/^@/, "")}
