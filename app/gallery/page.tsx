@@ -25,6 +25,10 @@ type TokenRec = {
 
 const ADMIN_UI = process.env.NEXT_PUBLIC_ADMIN_UI === "true";
 
+function xHandle(x?: string) {
+  return (x || "").replace(/^@/, "");
+}
+
 function getAdminKeyFromSession(): string | null {
   try {
     let k = sessionStorage.getItem("fb_admin_key");
@@ -55,15 +59,14 @@ export default function GalleryPage() {
         const base: Item[] = json.items || [];
         setItems(base);
 
-        // patch likes + liked
         try {
-          const ids = base.map((i) => i.id).join(",");
+          const ids = base.map(i => i.id).join(",");
           if (ids) {
             const r = await fetch(`/api/likes?ids=${encodeURIComponent(ids)}`, { cache: "no-store" });
             const j = await r.json();
             if (j?.success && j.data) {
-              setItems((prev) =>
-                prev.map((it) => {
+              setItems(prev =>
+                prev.map(it => {
                   const d = j.data[it.id];
                   return d ? { ...it, likes: Number(d.count || 0), liked: !!d.liked } : it;
                 })
@@ -88,10 +91,10 @@ export default function GalleryPage() {
 
   const filtered = useMemo(() => {
     let list = [...items];
-    if (onlyMine) list = list.filter((it) => !!myTokens[it.id]);
+    if (onlyMine) list = list.filter(it => !!myTokens[it.id]);
     if (query.trim()) {
       const q = query.toLowerCase();
-      list = list.filter((it) => {
+      list = list.filter(it => {
         const s = `${it.title || ""} ${it.x || ""} ${it.discord || ""}`.toLowerCase();
         return s.includes(q);
       });
@@ -104,10 +107,7 @@ export default function GalleryPage() {
     return list;
   }, [items, query, sort, onlyMine, myTokens]);
 
-  function xHandle(x?: string) {
-    return (x || "").replace(/^@/, "");
-  }
-
+  // delete
   async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
     const confirmText = isAdmin ? "Delete this artwork as ADMIN?" : "Delete this artwork?";
     if (!confirm(confirmText)) return;
@@ -136,12 +136,10 @@ export default function GalleryPage() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || "Delete failed");
-      }
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Delete failed");
 
       alert(isAdmin ? "Admin delete success." : "Deleted successfully.");
-      setItems((prev) => prev.filter((x) => x.id !== id));
+      setItems(prev => prev.filter(x => x.id !== id));
 
       if (!isAdmin) {
         try {
@@ -158,11 +156,11 @@ export default function GalleryPage() {
     }
   }
 
-  // Like: panggil API; state global akan di-patch oleh ArtworkCard optimistic + di sini tidak perlu return apa-apa.
+  // like handler: sync dengan nilai server (count & liked)
   async function likeOne(id: string): Promise<void> {
-    const it = items.find((x) => x.id === id);
+    const it = items.find(x => x.id === id);
     if (!it) throw new Error("Item not found");
-    const author = xHandle(it.x) || (it.discord || "");
+    const author = xHandle(it.x) || it.discord || "";
 
     const r = await fetch("/api/like", {
       method: "POST",
@@ -172,9 +170,10 @@ export default function GalleryPage() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.success) throw new Error(j?.error || "Like failed");
 
-    // sinkronkan supaya angka sama dengan server
-    setItems((prev) =>
-      prev.map((x) => (x.id === id ? { ...x, liked: !!j.liked, likes: Number(j.count ?? x.likes ?? 0) } : x))
+    setItems(prev =>
+      prev.map(x =>
+        x.id === id ? { ...x, liked: Boolean(j.liked), likes: Number(j.count ?? (x.likes || 0)) } : x
+      )
     );
   }
 
@@ -190,7 +189,7 @@ export default function GalleryPage() {
         <div className="flex flex-wrap gap-3 items-center">
           <input
             type="search"
-            placeholder="Search title / @x / discc…"
+            placeholder="Search title / @x / discord…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="px-4 py-2 rounded-full"
@@ -238,7 +237,7 @@ export default function GalleryPage() {
 
       <h1 className="text-3xl font-bold text-gradient mb-2">Gallery</h1>
       <p className="text-white/60 mb-6">
-        {filtered.length} result{filtered.length !== 1 ? "s" : ""}{" "}
+        {filtered.length} result{filtered.length !== 1 ? "s" : ""}
         {ADMIN_UI && adminMode && <span className="ml-2">• <b>Admin Mode ON</b></span>}
         {onlyMine && <span className="ml-2">• showing <b>my uploads</b></span>}
         {query && <span className="ml-2">• for <span className="text-gradient">{query}</span></span>}

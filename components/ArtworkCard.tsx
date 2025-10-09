@@ -1,4 +1,5 @@
 "use client";
+
 import { useState } from "react";
 import { Heart } from "lucide-react";
 
@@ -17,7 +18,7 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => Promise<void>;
+  onLike: (id: string) => void | Promise<void>;
 }) {
   const [liked, setLiked] = useState(Boolean(item.liked));
   const [likes, setLikes] = useState(Number(item.likes || 0));
@@ -27,11 +28,11 @@ export default function ArtworkCard({
   async function handleLike() {
     if (busy) return;
     setBusy(true);
-    const next = !liked;
 
+    const next = !liked;
     // optimistic
     setLiked(next);
-    setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
+    setLikes(n => Math.max(0, n + (next ? 1 : -1)));
     if (next) {
       setBurst(true);
       setTimeout(() => setBurst(false), 600);
@@ -40,13 +41,16 @@ export default function ArtworkCard({
     try {
       await onLike(item.id);
     } catch {
+      // rollback
       setLiked(!next);
-      setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
+      setLikes(n => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
     } finally {
       setBusy(false);
     }
   }
+
+  const xHandle = (item.x ?? "").replace(/^@/, "");
 
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
@@ -61,10 +65,10 @@ export default function ArtworkCard({
           {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${(item.x || "").replace(/^@/, "")}`, "_blank")}
+              onClick={() => window.open(`https://x.com/${xHandle}`, "_blank")}
               title="Open X profile"
             >
-              @{(item.x || "").replace(/^@/, "")}
+              @{xHandle}
             </button>
           )}
 
