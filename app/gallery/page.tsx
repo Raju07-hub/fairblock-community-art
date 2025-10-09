@@ -47,7 +47,6 @@ export default function GalleryPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState<boolean>(false);
 
-  // initial load
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/gallery", { cache: "no-store" });
@@ -56,7 +55,7 @@ export default function GalleryPage() {
         const base: Item[] = json.items || [];
         setItems(base);
 
-        // Hydrate jumlah like & status liked dari server
+        // patch likes + liked
         try {
           const ids = base.map((i) => i.id).join(",");
           if (ids) {
@@ -109,7 +108,6 @@ export default function GalleryPage() {
     return (x || "").replace(/^@/, "");
   }
 
-  // delete
   async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
     const confirmText = isAdmin ? "Delete this artwork as ADMIN?" : "Delete this artwork?";
     if (!confirm(confirmText)) return;
@@ -160,8 +158,8 @@ export default function GalleryPage() {
     }
   }
 
-  // like handler -> return { liked, count } untuk disinkron ke card
-  async function likeOne(id: string): Promise<{ liked: boolean; count: number }> {
+  // Like: panggil API; state global akan di-patch oleh ArtworkCard optimistic + di sini tidak perlu return apa-apa.
+  async function likeOne(id: string): Promise<void> {
     const it = items.find((x) => x.id === id);
     if (!it) throw new Error("Item not found");
     const author = xHandle(it.x) || (it.discord || "");
@@ -171,22 +169,17 @@ export default function GalleryPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, author }),
     });
-    const j = await r.json().catch(() => ({} as any));
+    const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.success) throw new Error(j?.error || "Like failed");
 
-    const payload = { liked: !!j.liked, count: Number(j.count ?? 0) };
-
-    // sinkron state global berdasarkan angka server
+    // sinkronkan supaya angka sama dengan server
     setItems((prev) =>
-      prev.map((x) => (x.id === id ? { ...x, liked: payload.liked, likes: payload.count } : x))
+      prev.map((x) => (x.id === id ? { ...x, liked: !!j.liked, likes: Number(j.count ?? x.likes ?? 0) } : x))
     );
-
-    return payload;
   }
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
-      {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
@@ -197,7 +190,7 @@ export default function GalleryPage() {
         <div className="flex flex-wrap gap-3 items-center">
           <input
             type="search"
-            placeholder="Search title / @x / discord…"
+            placeholder="Search title / @x / discc…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="px-4 py-2 rounded-full"

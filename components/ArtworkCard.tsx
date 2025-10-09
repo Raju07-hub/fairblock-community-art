@@ -18,22 +18,19 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => Promise<{ liked: boolean; count: number }>;
+  onLike: (id: string) => Promise<void>;
 }) {
   const [liked, setLiked] = useState(Boolean(item.liked));
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [burst, setBurst] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const openXProfile = () => {
-    const handle = item.x ? item.x.replace(/^@/, "") : "";
-    if (handle) window.open(`https://x.com/${handle}`, "_blank");
-  };
-
   async function handleLike() {
     if (busy) return;
     setBusy(true);
+
     const next = !liked;
+    // Optimistic
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
     if (next) {
@@ -42,12 +39,9 @@ export default function ArtworkCard({
     }
 
     try {
-      const res = await onLike(item.id);
-      if (res) {
-        setLiked(res.liked);
-        setLikes(res.count);
-      }
+      await onLike(item.id);
     } catch {
+      // rollback
       setLiked(!next);
       setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
@@ -69,12 +63,15 @@ export default function ArtworkCard({
           {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={openXProfile}
+              onClick={() =>
+                window.open(`https://x.com/${(item.x || "").replace(/^@/, "")}`, "_blank")
+              }
               title="Open X profile"
             >
-              @{(item.x ?? "").replace(/^@/, "")}
+              @{(item.x || "").replace(/^@/, "")}
             </button>
           )}
+
           {item.discord && (
             <button
               onClick={async () => {

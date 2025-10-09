@@ -1,23 +1,31 @@
+// app/api/likes/route.ts
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
-import { ensureUserId, attachUserIdCookie } from "@/lib/user-id";
+import { cookies } from "next/headers";
+import { COOKIE_META } from "@/lib/user-id";
+
+const cKey = (id: string) => `fb:art:${id}:count`;
+const seenKey = (id: string) => `fb:art:${id}:seen`;
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const ids = (url.searchParams.get("ids") || "").split(",").map(s => s.trim()).filter(Boolean);
+  const idsParam = url.searchParams.get("ids") || "";
+  const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!ids.length) return NextResponse.json({ success: true, data: {} });
 
-  const uid = await ensureUserId();
-  const resData: Record<string, { count: number; liked: boolean }> = {};
+  const c = await cookies();
+  const uid = c.get(COOKIE_META.name)?.value || "anon";
 
-  for (const id of ids) {
-    const countKey = `likes:count:${id}`;
-    const n = Number((await kv.get(countKey)) || 0);
-    const likedKey = `likes:user:${uid}`;
-    const liked = Boolean(await kv.sismember(likedKey, id));
-    resData[id] = { count: n, liked };
-  }
+  // ambil count
+  const counts = await kv.mget<number[]>(...ids.map((id) => cKey(id)));
+  const data: Record<string, { count: number; liked: boolean }> = {};
+  await Promise.all(
+    ids.map(async (id, i) => {
+      const count = Number(counts?.[i] ?? 0);
+      const liked = Boolean(await kv.sismember(seenKey(id), uid));
+      data[id] = { count, liked };
+    })
+  );
 
-  const res = NextResponse.json({ success: true, data: resData });
-  attachUserIdCookie(res, uid);
-  return res;
+  return NextResponse.json({ success: true, data });
 }
