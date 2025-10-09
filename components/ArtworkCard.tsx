@@ -24,7 +24,7 @@ export default function ArtworkCard({
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [busy, setBusy] = useState(false);
 
-  // Sinkronkan state lokal jika parent mengirim prop baru (mis. setelah refresh / re-fetch)
+  // sinkronkan ulang setiap kali parent update data (mis. setelah refresh)
   useEffect(() => {
     setLiked(!!item.liked);
     setLikes(Number(item.likes || 0));
@@ -35,15 +35,14 @@ export default function ArtworkCard({
     setBusy(true);
 
     const next = !liked;
-    // Optimistic update
+    // optimistic update
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
 
     try {
       await onLike(item.id);
-      // Parent akan menyamakan angka dari server; useEffect di atas akan menyetel ulang bila ada perubahan.
     } catch {
-      // rollback kalau gagal
+      // rollback jika gagal
       setLiked(!next);
       setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
@@ -52,10 +51,12 @@ export default function ArtworkCard({
     }
   }
 
+  // handle aman untuk X username
+  const xHandle = item.x ? item.x.replace(/^@/, "") : null;
+
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
       <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
-        {/* fallback kecil kalau img gagal */}
         <img
           src={item.url}
           alt={item.title}
@@ -74,22 +75,23 @@ export default function ArtworkCard({
 
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {item.x && (
+          {xHandle && (
             <button
               className="btn-ghost text-sm px-3 py-1"
               onClick={() =>
-                window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")
+                window.open(`https://x.com/${xHandle}`, "_blank")
               }
               title="Open X profile"
             >
-              @{item.x.replace(/^@/, "")}
+              @{xHandle}
             </button>
           )}
+
           {item.discord && (
             <button
               onClick={async () => {
                 try {
-                  await navigator.clipboard.writeText(item.discord!);
+                  await navigator.clipboard.writeText(item.discord);
                   alert("Discord handle copied.");
                 } catch {}
               }}
