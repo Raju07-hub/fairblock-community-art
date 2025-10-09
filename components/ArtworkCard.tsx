@@ -1,5 +1,4 @@
 "use client";
-
 import { useState } from "react";
 import { Heart } from "lucide-react";
 
@@ -28,9 +27,9 @@ export default function ArtworkCard({
   async function handleLike() {
     if (busy) return;
     setBusy(true);
-
     const next = !liked;
-    // Optimistic
+
+    // optimistic
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
     if (next) {
@@ -41,7 +40,6 @@ export default function ArtworkCard({
     try {
       await onLike(item.id);
     } catch {
-      // rollback
       setLiked(!next);
       setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
@@ -63,9 +61,7 @@ export default function ArtworkCard({
           {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() =>
-                window.open(`https://x.com/${(item.x || "").replace(/^@/, "")}`, "_blank")
-              }
+              onClick={() => window.open(`https://x.com/${(item.x || "").replace(/^@/, "")}`, "_blank")}
               title="Open X profile"
             >
               @{(item.x || "").replace(/^@/, "")}

@@ -1,5 +1,7 @@
 // lib/kv.ts
 import { Redis } from "@upstash/redis";
 
-const kv = Redis.fromEnv(); // otomatis baca env UPSTASH_REDIS_REST_URL/TOKEN
+// Wajib set env ini di Vercel: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+// Redis.fromEnv() otomatis baca dua env itu, dan aman untuk Edge/Node.
+const kv = Redis.fromEnv();
 export default kv;

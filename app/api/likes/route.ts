@@ -1,4 +1,6 @@
 // app/api/likes/route.ts
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
 import { cookies } from "next/headers";
@@ -16,13 +18,14 @@ export async function GET(req: Request) {
   const c = await cookies();
   const uid = c.get(COOKIE_META.name)?.value || "anon";
 
-  // ambil count
-  const counts = await kv.mget<number[]>(...ids.map((id) => cKey(id)));
+  // mget count
+  const counts = await kv.mget<number | null>(...ids.map((id) => cKey(id)));
   const data: Record<string, { count: number; liked: boolean }> = {};
+
   await Promise.all(
     ids.map(async (id, i) => {
       const count = Number(counts?.[i] ?? 0);
-      const liked = Boolean(await kv.sismember(seenKey(id), uid));
+      const liked = !!(await kv.sismember(seenKey(id), uid));
       data[id] = { count, liked };
     })
   );
