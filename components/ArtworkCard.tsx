@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Heart } from "lucide-react";
 
 type Artwork = {
@@ -18,18 +18,20 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => Promise<{ liked: boolean; count: number }>;
+  onLike: (id: string) => void | Promise<void>;
 }) {
-  const [liked, setLiked] = useState(!!item.liked);
-  const [likes, setLikes] = useState(Number(item.likes ?? 0));
+  const [liked, setLiked] = useState(Boolean(item.liked));
+  const [likes, setLikes] = useState(Number(item.likes || 0));
   const [burst, setBurst] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // aman buat TS & re-use
+  const xClean = useMemo(() => (item.x ?? "").replace(/^@/, ""), [item.x]);
 
   async function handleLike() {
     if (busy) return;
     setBusy(true);
 
-    // Optimistic
     const next = !liked;
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
@@ -39,12 +41,8 @@ export default function ArtworkCard({
     }
 
     try {
-      // HARUS mengacu ke angka dari server agar persist saat refresh
-      const r = await onLike(item.id);
-      setLiked(r.liked);
-      setLikes(r.count);
+      await onLike(item.id);
     } catch {
-      // rollback jika gagal
       setLiked(!next);
       setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
@@ -66,15 +64,16 @@ export default function ArtworkCard({
       {/* Baris tag (kiri) + tombol like (kanan) */}
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {item.x && (
+          {item.x ? (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")}
+              onClick={() => window.open(`https://x.com/${xClean}`, "_blank")}
               title="Open X profile"
             >
-              @{item.x.replace(/^@/, "")}
+              @{xClean}
             </button>
-          )}
+          ) : null}
+
           {item.discord && (
             <button
               onClick={async () => {
