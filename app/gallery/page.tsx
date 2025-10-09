@@ -1,8 +1,9 @@
 // app/gallery/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ArtworkCard from "@/components/ArtworkCard";
 
 type Item = {
@@ -28,6 +29,12 @@ const ADMIN_UI = process.env.NEXT_PUBLIC_ADMIN_UI === "true";
 function xHandle(x?: string) {
   return (x || "").replace(/^@/, "");
 }
+function handleFromItem(it: Item): string {
+  const x = xHandle(it.x);
+  if (x) return `@${x}`;
+  const d = (it.discord || "").replace(/^@/, "");
+  return d ? `@${d}` : "";
+}
 
 function getAdminKeyFromSession(): string | null {
   try {
@@ -43,19 +50,45 @@ function getAdminKeyFromSession(): string | null {
 }
 
 export default function GalleryPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+
+  // query params support
+  const qParam = (params.get("q") || "").trim();
+  const selectParam = params.get("select") || "";
+
   const [items, setItems] = useState<Item[]>([]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(qParam); // initial from ?q=
   const [sort, setSort] = useState<"new" | "old">("new");
   const [onlyMine, setOnlyMine] = useState(false);
   const [myTokens, setMyTokens] = useState<Record<string, TokenRec>>({});
   const [deleting, setDeleting] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState<boolean>(false);
 
+  // Keep URL in sync when query changes (so shareable link persists)
+  useEffect(() => {
+    const current = new URLSearchParams(Array.from(params.entries()));
+    if (query) current.set("q", query);
+    else current.delete("q");
+    const next = `${pathname}?${current.toString()}`.replace(/\?$/, "");
+    // only replace if different
+    const now = `${pathname}?${params.toString()}`.replace(/\?$/, "");
+    if (next !== now) router.replace(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  // If URL ?q= changed externally (e.g., from a link), reflect into input
+  useEffect(() => {
+    if ((qParam || "") !== (query || "")) setQuery(qParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qParam]);
+
   // initial load + tarik likes & liked status dari server
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/gallery", { cache: "no-store" });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({} as any));
       if (json?.success) {
         const base: Item[] = json.items || [];
         setItems(base);
@@ -66,7 +99,7 @@ export default function GalleryPage() {
             const r = await fetch(`/api/likes?ids=${encodeURIComponent(ids)}`, {
               cache: "no-store",
             });
-            const j = await r.json();
+            const j = await r.json().catch(() => ({}));
             if (j?.success && j.data) {
               setItems((prev) =>
                 prev.map((it) => {
@@ -100,8 +133,9 @@ export default function GalleryPage() {
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter((it) => {
-        const s = `${it.title || ""} ${it.x || ""} ${it.discord || ""}`.toLowerCase();
-        return s.includes(q);
+        const handle = handleFromItem(it).toLowerCase();
+        const s = `${it.title || ""} ${it.x || ""} ${it.discord || ""} ${handle}`.toLowerCase();
+        return s.includes(q) || it.id.toLowerCase().includes(q);
       });
     }
     list.sort((a, b) =>
@@ -111,6 +145,21 @@ export default function GalleryPage() {
     );
     return list;
   }, [items, query, sort, onlyMine, myTokens]);
+
+  // Auto-scroll + highlight when ?select=<id>
+  useEffect(() => {
+    if (!selectParam) return;
+    // wait a tick to ensure items rendered
+    const t = setTimeout(() => {
+      const el = document.getElementById(`art-${selectParam}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-2", "ring-pink-500");
+        setTimeout(() => el.classList.remove("ring-2", "ring-pink-500"), 1600);
+      }
+    }, 150);
+    return () => clearTimeout(t);
+  }, [selectParam, filtered.length]);
 
   // delete
   async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
@@ -263,8 +312,12 @@ export default function GalleryPage() {
           {filtered.map((it) => {
             const mine = !!myTokens[it.id];
             return (
-              <div key={it.id} className="flex flex-col">
+              <div key={it.id} id={`art-${it.id}`} className="flex flex-col">
                 <ArtworkCard item={it} onLike={likeOne} />
+                <div className="mt-2 text-xs opacity-70">
+                  {handleFromItem(it)} · {it.id}
+                </div>
+
                 {mine && (
                   <button
                     onClick={() => onDelete(it.id, it.metaUrl, false)}
