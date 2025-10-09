@@ -24,25 +24,25 @@ export default function ArtworkCard({
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [busy, setBusy] = useState(false);
 
-  // sinkronkan ulang setiap kali parent update data (mis. setelah refresh)
+  // keep in sync with parent
   useEffect(() => {
     setLiked(!!item.liked);
     setLikes(Number(item.likes || 0));
-  }, [item.liked, item.likes, item.id]);
+  }, [item.id, item.liked, item.likes]);
 
   async function handleLike() {
     if (busy) return;
     setBusy(true);
 
     const next = !liked;
-    // optimistic update
+    // optimistic
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
 
     try {
       await onLike(item.id);
     } catch {
-      // rollback jika gagal
+      // rollback
       setLiked(!next);
       setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
@@ -51,7 +51,6 @@ export default function ArtworkCard({
     }
   }
 
-  // handle aman untuk X username
   const xHandle = item.x ? item.x.replace(/^@/, "") : null;
 
   return (
@@ -78,9 +77,7 @@ export default function ArtworkCard({
           {xHandle && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() =>
-                window.open(`https://x.com/${xHandle}`, "_blank")
-              }
+              onClick={() => window.open(`https://x.com/${xHandle}`, "_blank")}
               title="Open X profile"
             >
               @{xHandle}
@@ -90,8 +87,10 @@ export default function ArtworkCard({
           {item.discord && (
             <button
               onClick={async () => {
+                const handle = item.discord;
+                if (!handle) return; // type guard
                 try {
-                  await navigator.clipboard.writeText(item.discord);
+                  await navigator.clipboard.writeText(handle);
                   alert("Discord handle copied.");
                 } catch {}
               }}
