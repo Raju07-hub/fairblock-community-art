@@ -18,14 +18,13 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => Promise<void>;
+  onLike: (id: string) => Promise<{ liked: boolean; count: number }>;
 }) {
   const [liked, setLiked] = useState(Boolean(item.liked));
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [burst, setBurst] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // handler aman untuk link X (menghindari error TS "possibly undefined")
   const openXProfile = () => {
     const handle = item.x ? item.x.replace(/^@/, "") : "";
     if (handle) window.open(`https://x.com/${handle}`, "_blank");
@@ -34,7 +33,6 @@ export default function ArtworkCard({
   async function handleLike() {
     if (busy) return;
     setBusy(true);
-
     const next = !liked;
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
@@ -44,7 +42,11 @@ export default function ArtworkCard({
     }
 
     try {
-      await onLike(item.id);
+      const res = await onLike(item.id);
+      if (res) {
+        setLiked(res.liked);
+        setLikes(res.count);
+      }
     } catch {
       setLiked(!next);
       setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
@@ -56,15 +58,12 @@ export default function ArtworkCard({
 
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
-      {/* Gambar */}
       <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
         <img src={item.url} alt={item.title} className="w-full h-full object-contain" />
       </div>
 
-      {/* Judul */}
       <h3 className="mt-3 font-semibold truncate">{item.title}</h3>
 
-      {/* Tag kiri + like kanan */}
       <div className="mt-2 flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           {item.x && (
@@ -76,7 +75,6 @@ export default function ArtworkCard({
               @{(item.x ?? "").replace(/^@/, "")}
             </button>
           )}
-
           {item.discord && (
             <button
               onClick={async () => {
@@ -93,7 +91,6 @@ export default function ArtworkCard({
           )}
         </div>
 
-        {/* Like di kanan */}
         <div className="relative">
           {burst && (
             <span className="pointer-events-none absolute -top-5 right-1 like-burst">
