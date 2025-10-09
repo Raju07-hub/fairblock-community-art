@@ -104,10 +104,9 @@ export default function LeaderboardPage() {
 
   // Label info sesuai range
   const resetLabel =
-    range === "weekly"
-      ? "Weekly reset: Sabtu 07:00 WIB (00:00 UTC)"
-      : "Daily reset: 07:00 WIB (00:00 UTC)";
-
+  range === "weekly"
+    ? "Weekly reset: every Saturday at 00:00 UTC+7"
+    : "Daily reset: every day at 00:00 UTC+7";
   return (
     <div className="max-w-6xl mx-auto px-5 sm:px-6 py-10">
       <div className="flex items-center justify-between mb-6 gap-3">
