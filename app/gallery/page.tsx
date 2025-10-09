@@ -1,9 +1,8 @@
 // app/gallery/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ArtworkCard from "@/components/ArtworkCard";
 
 type Item = {
@@ -29,12 +28,6 @@ const ADMIN_UI = process.env.NEXT_PUBLIC_ADMIN_UI === "true";
 function xHandle(x?: string) {
   return (x || "").replace(/^@/, "");
 }
-function handleFromItem(it: Item): string {
-  const x = xHandle(it.x);
-  if (x) return `@${x}`;
-  const d = (it.discord || "").replace(/^@/, "");
-  return d ? `@${d}` : "";
-}
 
 function getAdminKeyFromSession(): string | null {
   try {
@@ -50,45 +43,32 @@ function getAdminKeyFromSession(): string | null {
 }
 
 export default function GalleryPage() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-
-  // query params support
-  const qParam = (params.get("q") || "").trim();
-  const selectParam = params.get("select") || "";
-
   const [items, setItems] = useState<Item[]>([]);
-  const [query, setQuery] = useState(qParam); // initial from ?q=
+  const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"new" | "old">("new");
   const [onlyMine, setOnlyMine] = useState(false);
   const [myTokens, setMyTokens] = useState<Record<string, TokenRec>>({});
   const [deleting, setDeleting] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState<boolean>(false);
 
-  // Keep URL in sync when query changes (so shareable link persists)
-  useEffect(() => {
-    const current = new URLSearchParams(Array.from(params.entries()));
-    if (query) current.set("q", query);
-    else current.delete("q");
-    const next = `${pathname}?${current.toString()}`.replace(/\?$/, "");
-    // only replace if different
-    const now = `${pathname}?${params.toString()}`.replace(/\?$/, "");
-    if (next !== now) router.replace(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  // NEW: baca ?q dan ?select dari URL (tanpa hook Next)
+  const [selectedId, setSelectedId] = useState<string>("");
 
-  // If URL ?q= changed externally (e.g., from a link), reflect into input
   useEffect(() => {
-    if ((qParam || "") !== (query || "")) setQuery(qParam);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qParam]);
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const q0 = (sp.get("q") || "").trim();
+      const sel = sp.get("select") || "";
+      if (q0) setQuery(q0);
+      if (sel) setSelectedId(sel);
+    } catch {}
+  }, []);
 
   // initial load + tarik likes & liked status dari server
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/gallery", { cache: "no-store" });
-      const json = await res.json().catch(() => ({} as any));
+      const json = await res.json();
       if (json?.success) {
         const base: Item[] = json.items || [];
         setItems(base);
@@ -99,7 +79,7 @@ export default function GalleryPage() {
             const r = await fetch(`/api/likes?ids=${encodeURIComponent(ids)}`, {
               cache: "no-store",
             });
-            const j = await r.json().catch(() => ({}));
+            const j = await r.json();
             if (j?.success && j.data) {
               setItems((prev) =>
                 prev.map((it) => {
@@ -133,8 +113,7 @@ export default function GalleryPage() {
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter((it) => {
-        const handle = handleFromItem(it).toLowerCase();
-        const s = `${it.title || ""} ${it.x || ""} ${it.discord || ""} ${handle}`.toLowerCase();
+        const s = `${it.title || ""} ${it.x || ""} ${it.discord || ""}`.toLowerCase();
         return s.includes(q) || it.id.toLowerCase().includes(q);
       });
     }
@@ -146,20 +125,17 @@ export default function GalleryPage() {
     return list;
   }, [items, query, sort, onlyMine, myTokens]);
 
-  // Auto-scroll + highlight when ?select=<id>
+  // NEW: auto-scroll + highlight kalau ada ?select
   useEffect(() => {
-    if (!selectParam) return;
-    // wait a tick to ensure items rendered
-    const t = setTimeout(() => {
-      const el = document.getElementById(`art-${selectParam}`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.classList.add("ring-2", "ring-pink-500");
-        setTimeout(() => el.classList.remove("ring-2", "ring-pink-500"), 1600);
-      }
-    }, 150);
-    return () => clearTimeout(t);
-  }, [selectParam, filtered.length]);
+    if (!selectedId) return;
+    const el = document.getElementById(`art-${selectedId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-pink-500");
+      const t = setTimeout(() => el.classList.remove("ring-2", "ring-pink-500"), 1600);
+      return () => clearTimeout(t);
+    }
+  }, [selectedId, filtered.length]);
 
   // delete
   async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
@@ -314,10 +290,6 @@ export default function GalleryPage() {
             return (
               <div key={it.id} id={`art-${it.id}`} className="flex flex-col">
                 <ArtworkCard item={it} onLike={likeOne} />
-                <div className="mt-2 text-xs opacity-70">
-                  {handleFromItem(it)} · {it.id}
-                </div>
-
                 {mine && (
                   <button
                     onClick={() => onDelete(it.id, it.metaUrl, false)}
