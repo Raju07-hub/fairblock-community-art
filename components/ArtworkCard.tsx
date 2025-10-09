@@ -1,67 +1,115 @@
-// components/ArtworkCard.tsx
 "use client";
-import { useEffect, useState } from "react";
-import { getAnonId } from "@/lib/anon";
 
-export default function ArtworkCard({ item }: { item: any }) {
-  const [likes, setLikes] = useState(0);
-  const [liked, setLiked] = useState(false);
-  const userId = getAnonId();
+import { useState } from "react";
+import { Heart } from "lucide-react";
 
-  useEffect(() => {
-    fetch(`/api/like?id=${item.id}&user=${userId}`)
-      .then(r => r.json())
-      .then(d => { setLikes(d.count || 0); setLiked(!!d.liked); });
-  }, [item.id, userId]);
+type Artwork = {
+  id: string;
+  title: string;
+  url: string;          // pakai nama field url seperti di gallery
+  x?: string;
+  discord?: string;
+  likes?: number;       // total likes (server)
+  liked?: boolean;      // apakah user ini sudah like
+};
 
-  async function likeOnce() {
-    if (liked) return;
-    const res = await fetch("/api/like", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artId: item.id, userId })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.error("Like error:", res.status, data);
-      alert(data?.error || "Failed to like.");
-      return;
+export default function ArtworkCard({
+  item,
+  onLike,
+}: {
+  item: Artwork;
+  onLike: (id: string) => void | Promise<void>;
+}) {
+  const [liked, setLiked]   = useState(Boolean(item.liked));
+  const [likes, setLikes]   = useState(Number(item.likes || 0));
+  const [burst, setBurst]   = useState(false);   // untuk animasi 💗
+  const [busy, setBusy]     = useState(false);   // cegah spam klik
+
+  async function handleLike() {
+    if (busy) return;
+    setBusy(true);
+
+    // Optimistic UI
+    const next = !liked;
+    setLiked(next);
+    setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
+    if (next) {
+      setBurst(true);
+      setTimeout(() => setBurst(false), 600);
     }
-    setLikes(data.count ?? likes + 1);
-    setLiked(true);
+
+    try {
+      await onLike(item.id);     // panggil API / sinkron leaderboard
+    } catch {
+      // rollback kalau gagal
+      setLiked(!next);
+      setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="card p-3 relative">
-      {/* gambar + judulmu */}
-      <img src={item.fileUrl} alt={item.title} className="rounded-xl w-full aspect-[4/3] object-cover" />
-      <div className="mt-3 font-semibold">{item.title}</div>
+    <div className="glass rounded-2xl p-3 card-hover flex flex-col relative">
+      {/* Gambar */}
+      <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
+        <img src={item.url} alt={item.title} className="w-full h-full object-contain" />
+      </div>
 
-      {/* ACTION ROW */}
-      <div className="mt-2 flex items-center gap-2">
-        {/* contoh tombol open X / copy discord milikmu... */}
-        {item.x && (
-          <a href={item.x} target="_blank" className="px-3 py-1 rounded-full bg-slate-700 hover:bg-slate-600 text-sm">
-            Open X ↗
-          </a>
-        )}
-        <button
-          onClick={() => navigator.clipboard.writeText(item.discord || "")}
-          className="px-3 py-1 rounded-full bg-slate-700 hover:bg-slate-600 text-sm"
-        >
-          Copy Discord
-        </button>
+      {/* Judul */}
+      <h3 className="mt-3 font-semibold truncate">{item.title}</h3>
 
-        {/* ❤️ LIKE — di sisi kanan action row */}
-        <button
-          onClick={likeOnce}
-          disabled={liked}
-          className={`ml-auto px-2.5 py-1 rounded-full flex items-center gap-1 text-sm
-            ${liked ? "bg-pink-600/60 cursor-not-allowed text-white" : "bg-pink-600 hover:bg-pink-500 text-white"}`}
-          title={liked ? "Liked" : "Like"}
-        >
-          ❤️ <span className="min-w-5 text-center">{likes}</span>
-        </button>
+      {/* Bar bawah: kiri = tag, kanan = like */}
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {item.x && (
+            <>
+              <button
+                className="btn-ghost text-sm px-3 py-1"
+                onClick={() => window.open(`https://x.com/${item.x.replace(/^@/,'')}`, "_blank")}
+                title="Open X profile"
+              >
+                @{item.x.replace(/^@/, "")}
+              </button>
+            </>
+          )}
+
+          {item.discord && (
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(item.discord!);
+                  alert("Discord handle copied.");
+                } catch {}
+              }}
+              className="btn-ghost text-sm px-3 py-1 underline"
+              title="Copy Discord handle"
+            >
+              Copy Discord
+            </button>
+          )}
+        </div>
+
+        {/* Like button di kanan */}
+        <div className="relative">
+          {/* burst heart (visual only) */}
+          {burst && (
+            <span className="pointer-events-none absolute -top-5 right-1 like-burst">
+              <Heart className="w-6 h-6 like-burst-heart" />
+            </span>
+          )}
+
+          <button
+            onClick={handleLike}
+            disabled={busy}
+            aria-pressed={liked}
+            className={`badge-like-big ${liked ? "liked" : ""}`}
+            title={liked ? "Unlike" : "Like"}
+          >
+            <Heart className={`w-5 h-5 ${liked ? "fill-current" : ""}`} />
+            <span className="text-sm">{likes}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
