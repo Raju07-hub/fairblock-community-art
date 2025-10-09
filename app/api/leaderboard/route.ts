@@ -8,13 +8,11 @@ function isoDateUTC(d = new Date()) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 function isoWeekUTC(d = new Date()) {
-  // ISO week number (UTC)
   const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  // Thursday in current week decides the year
-  const dayNum = (date.getUTCDay() + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - dayNum + 3);
-  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
-  const diff = (date.getTime() - firstThursday.getTime()) / 86400000;
+  const dayNum = (date.getUTCDay() + 6) % 7; // ISO: Senin=0
+  date.setUTCDate(date.getUTCDate() - dayNum + 3); // Kamis pekan itu
+  const firstThu = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const diff = (date.getTime() - firstThu.getTime()) / 86400000;
   const week = 1 + Math.floor(diff / 7);
   return `${date.getUTCFullYear()}-W${pad(week)}`;
 }
@@ -31,9 +29,10 @@ function zkey(period: "daily" | "weekly") {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const period = (searchParams.get("period") === "weekly" ? "weekly" : "daily") as
-    | "daily"
-    | "weekly";
+
+  // Terima 'range' (dipakai page.tsx) atau 'period'
+  const q = (searchParams.get("range") || searchParams.get("period") || "daily").toLowerCase();
+  const period: "daily" | "weekly" = q === "weekly" ? "weekly" : "daily";
 
   const keys = zkey(period);
 
@@ -54,10 +53,7 @@ export async function GET(req: Request) {
       raw: Array<{ member: string; score: number }> | (string | number)[]
     ): { member: string; score: number }[] {
       if (!Array.isArray(raw) || raw.length === 0) return [];
-      if (typeof raw[0] === "object") {
-        return raw as Array<{ member: string; score: number }>;
-      }
-      // alternating [member, score, member, score, ...]
+      if (typeof raw[0] === "object") return raw as Array<{ member: string; score: number }>;
       const out: { member: string; score: number }[] = [];
       for (let i = 0; i < raw.length; i += 2) {
         out.push({ member: String(raw[i]), score: Number(raw[i + 1] || 0) });
@@ -65,16 +61,26 @@ export async function GET(req: Request) {
       return out;
     }
 
-    const arts = normalize(rawArts).map((x) => ({ id: x.member, score: x.score }));
-    const creators = normalize(rawCreators).map((x) => ({ name: x.member, score: x.score }));
+    const topArts = normalize(rawArts).map((x) => ({ id: x.member, score: x.score }));
+    const topCreators = normalize(rawCreators).map((x) => ({ creator: x.member, score: x.score }));
 
+    // Kembalikan field yang DIHARAPKAN oleh page.tsx
     return NextResponse.json({
       success: true,
       period,
-      arts, // top 10
-      creators, // top 10
+      topArts,
+      topCreators,
+      // (opsional) tambahkan nama lama demi kompatibilitas
+      arts: topArts,
+      creators: topCreators,
     });
   } catch (e) {
-    return NextResponse.json({ success: false, error: (e as Error).message, arts: [], creators: [] });
+    return NextResponse.json({
+      success: false,
+      error: (e as Error).message,
+      period,
+      topArts: [],
+      topCreators: [],
+    });
   }
 }
