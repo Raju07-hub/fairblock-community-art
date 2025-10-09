@@ -15,11 +15,41 @@ function handleFromItem(it: GalleryItem): string {
   return d ? `@${d}` : "";
 }
 
+// ---------- Countdown helpers (UTC based) ----------
+const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
+
+function nextDailyResetUTC(now = new Date()): Date {
+  // Next 00:00 UTC
+  const targetMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
+  return new Date(targetMs);
+}
+
+function nextWeeklyResetUTC_Saturday(now = new Date()): Date {
+  // Weekly reset every Saturday 00:00 UTC
+  const todayMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0);
+  const day = new Date(todayMidnight).getUTCDay(); // 0=Sun..6=Sat
+  let daysAhead = (6 - day + 7) % 7; // distance to Saturday
+  let target = new Date(todayMidnight + daysAhead * DAY);
+  if (now.getTime() >= target.getTime()) target = new Date(target.getTime() + WEEK);
+  return target;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 0) ms = 0;
+  const sec = Math.floor(ms / MS) % 60;
+  const min = Math.floor(ms / (60 * MS)) % 60;
+  const hrs = Math.floor(ms / (3600 * MS));
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  return `${pad(hrs)}:${pad(min)}:${pad(sec)}`;
+}
+// ---------------------------------------------------
+
 export default function LeaderboardPage() {
   const [range, setRange] = useState<"daily" | "weekly">("daily");
   const [loading, setLoading] = useState(true);
   const [lb, setLb] = useState<LbResp | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
+  const [countdown, setCountdown] = useState<string>("--:--:--");
 
   const btn = "btn px-4 py-1 rounded-full text-sm";
   const badge = "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
@@ -41,7 +71,21 @@ export default function LeaderboardPage() {
 
   useEffect(() => { load(range); }, [range]);
 
+  // Tick countdown setiap detik
+  useEffect(() => {
+    function compute() {
+      const now = new Date();
+      const target =
+        range === "weekly" ? nextWeeklyResetUTC_Saturday(now) : nextDailyResetUTC(now);
+      setCountdown(formatDuration(target.getTime() - now.getTime()));
+    }
+    compute();
+    const t = setInterval(compute, 1000);
+    return () => clearInterval(t);
+  }, [range]);
+
   const byId = useMemo(() => new Map(gallery.map(it => [it.id, it])), [gallery]);
+
   const uploadsByCreator = useMemo(() => {
     const m = new Map<string, number>();
     for (const it of gallery) {
@@ -58,6 +102,12 @@ export default function LeaderboardPage() {
     return arr.slice(0, 10);
   }, [uploadsByCreator]);
 
+  // Label info sesuai range
+  const resetLabel =
+    range === "weekly"
+      ? "Weekly reset: Sabtu 07:00 WIB (00:00 UTC)"
+      : "Daily reset: 07:00 WIB (00:00 UTC)";
+
   return (
     <div className="max-w-6xl mx-auto px-5 sm:px-6 py-10">
       <div className="flex items-center justify-between mb-6 gap-3">
@@ -66,7 +116,12 @@ export default function LeaderboardPage() {
           <Link href="/gallery" className="btn">🖼️ Gallery</Link>
           <Link href="/submit" className="btn">＋ Submit</Link>
         </div>
+
         <div className="flex items-center gap-2">
+          <div className="hidden sm:flex flex-col items-end mr-2">
+            <span className="text-xs opacity-70">{resetLabel}</span>
+            <span className="text-sm font-semibold text-[#3aaefc]">Resets in {countdown}</span>
+          </div>
           <select value={range} onChange={e => setRange(e.target.value as "daily" | "weekly")} className="btn">
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
