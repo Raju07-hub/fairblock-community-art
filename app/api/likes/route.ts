@@ -1,12 +1,8 @@
-// app/api/likes/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import kv from "@/lib/kv";
 import { getUserIdFromCookies } from "@/lib/user-id";
 
-/**
- * GET /api/likes?ids=id1,id2,id3
- * return: { success, data: { [id]: { count, liked } } }
- */
+/** GET /api/likes?ids=id1,id2,... => { success, data: { [id]: { count, liked } } } */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -14,12 +10,11 @@ export async function GET(req: NextRequest) {
     const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
     if (ids.length === 0) return NextResponse.json({ success: true, data: {} });
 
-    const userId = getUserIdFromCookies();
+    const userId = await getUserIdFromCookies();
     const likedKey = userId ? `likes:user:${userId}` : null;
 
     const out: Record<string, { count: number; liked: boolean }> = {};
 
-    // ambil count & status liked per id (paralel per id)
     await Promise.all(
       ids.map(async (id) => {
         const [countRaw, likedRaw] = await Promise.all([

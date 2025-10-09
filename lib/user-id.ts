@@ -6,9 +6,9 @@ const COOKIE_NAME = "fb_uid";
 const MAX_AGE = 60 * 60 * 24 * 365 * 5; // 5 tahun
 
 /** Ambil user id dari cookie; jika belum ada, return null */
-export function getUserIdFromCookies(): string | null {
+export async function getUserIdFromCookies(): Promise<string | null> {
   try {
-    const c = cookies();
+    const c = await cookies();
     return c.get(COOKIE_NAME)?.value || null;
   } catch {
     return null;
@@ -16,8 +16,8 @@ export function getUserIdFromCookies(): string | null {
 }
 
 /** Pastikan cookie user id ada; kalau belum ada, set sekarang lalu return id */
-export function ensureUserIdCookie(): string {
-  const c = cookies();
+export async function ensureUserIdCookie(): Promise<string> {
+  const c = await cookies();
   let id = c.get(COOKIE_NAME)?.value;
   if (!id) {
     id = randomUUID();

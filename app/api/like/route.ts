@@ -1,4 +1,3 @@
-// app/api/like/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import kv from "@/lib/kv";
 import { ensureUserIdCookie } from "@/lib/user-id";
@@ -6,14 +5,13 @@ import { ensureUserIdCookie } from "@/lib/user-id";
 /** ISO week helper: YYYY-Www (UTC) */
 function isoWeekKey(d = new Date()) {
   const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const dayNum = date.getUTCDay() || 7; // Kamis anchor (ISO)
+  const dayNum = date.getUTCDay() || 7;
   date.setUTCDate(date.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
   const weekNo = Math.ceil((((date as unknown as number) - (yearStart as unknown as number)) / 86400000 + 1) / 7);
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
-/** key leaderboard (daily/weekly/monthly) utk art & creator */
 function makeNowKeys() {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
@@ -22,7 +20,6 @@ function makeNowKeys() {
   const daily = `${yyyy}-${mm}-${dd}`;
   const weekly = isoWeekKey(now);
   const monthly = `${yyyy}-${mm}`;
-
   return {
     artDaily: `lb:daily:${daily}`,
     creatorDaily: `lb:creator:daily:${daily}`,
@@ -38,25 +35,21 @@ export async function POST(req: NextRequest) {
     const { id, author } = await req.json();
     if (!id) throw new Error("Missing art id");
 
-    // pastikan cookie user id ada
-    const userId = ensureUserIdCookie();
+    // pastikan cookie user-id ada (await!)
+    const userId = await ensureUserIdCookie();
     const likedKey = `likes:user:${userId}`;
     const countKey = `likes:count:${id}`;
 
-    // sudah like?
     const already = await kv.sismember(likedKey, id);
 
     if (already) {
-      // UNLIKE
       await Promise.all([kv.srem(likedKey, id), kv.decr(countKey)]);
       const count = Number((await kv.get<number>(countKey)) || 0);
       return NextResponse.json({ success: true, liked: false, count });
     }
 
-    // LIKE
     await Promise.all([kv.sadd(likedKey, id), kv.incr(countKey)]);
 
-    // naikkan leaderboard
     const keys = makeNowKeys();
     const incs: Promise<any>[] = [
       kv.zincrby(keys.artDaily, 1, id),
