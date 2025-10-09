@@ -18,10 +18,10 @@ export async function GET(req: Request) {
   const c = await cookies();
   const uid = c.get(COOKIE_META.name)?.value || "anon";
 
-  // mget count
-  const counts = await kv.mget<number | null>(...ids.map((id) => cKey(id)));
-  const data: Record<string, { count: number; liked: boolean }> = {};
+  // ✅ mget<number>() → Promise<(number|null)[]>
+  const counts = await kv.mget<number>(...ids.map((id) => cKey(id)));
 
+  const data: Record<string, { count: number; liked: boolean }> = {};
   await Promise.all(
     ids.map(async (id, i) => {
       const count = Number(counts?.[i] ?? 0);
