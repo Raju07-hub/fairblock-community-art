@@ -1,58 +1,59 @@
+// app/api/like/route.ts
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
 import { getUserIdFromCookies, ensureUserIdCookie } from "@/lib/user-id";
 
-// kunci dasar
-const cKey = (id: string) => `likes:count:${id}`;                // total like per art (number)
-const uKey = (uid: string, id: string) => `likes:user:${uid}:${id}`; // flag like user (number >0 berarti liked)
+const cKey = (id: string) => `likes:count:${id}`;
+const uKey = (uid: string, id: string) => `likes:user:${uid}:${id}`;
 
-// leaderboard (opsional, aman kalau belum dipakai)
-const Z_ART = "lb:art"; // leaderboard per-art (global total)
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const id = String(body?.id || "");
+  const author = String(body?.author || "");
 
-export async function POST(req: Request) {
-  const { id } = await req.json().catch(() => ({} as any));
-  if (!id) return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
+  if (!id) {
+    return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
+  }
 
-  const res = NextResponse.json({ success: true } as any);
+  // kita butuh response utk menyisipkan cookie bila belum ada
+  const res = new NextResponse();
 
-  // pastikan ada user id cookie
+  // pastikan user punya UID cookie
   let uid = await getUserIdFromCookies();
-  if (!uid) uid = await ensureUserIdCookie(res);
+  if (!uid) {
+    uid = await ensureUserIdCookie(res); // men-SET cookie di 'res'
+  }
 
   const userFlagKey = uKey(uid!, id);
 
-  // apakah user sudah like sebelumnya?
+  // apakah user sudah like?
   const current = await kv.get<number | null>(userFlagKey);
   const alreadyLiked = (current ?? 0) > 0;
 
   let liked: boolean;
   let count: number;
 
-  if (!alreadyLiked) {
-    // LIKE
-    const [newCount] = await Promise.all([
-      kv.incr(cKey(id)),
-      kv.incr(userFlagKey),
-      kv.zincrby(Z_ART, 1, id).catch(() => 0), // ignore kalau ZSET belum ada/opsional
-    ]);
-    count = Number(newCount ?? 0);
-    liked = true;
-  } else {
-    // UNLIKE (hindari negatif)
-    const currTotal = Number((await kv.get<number | null>(cKey(id))) ?? 0);
-    if (currTotal > 0) {
-      const [afterDecr] = await Promise.all([
-        kv.decr(cKey(id)),
-        kv.decr(userFlagKey),
-        kv.zincrby(Z_ART, -1, id).catch(() => 0),
-      ]);
-      count = Math.max(0, Number(afterDecr ?? 0));
+  if (alreadyLiked) {
+    // UNLIKE — jaga agar count tidak negatif
+    const curCount = (await kv.get<number | null>(cKey(id))) ?? 0;
+    if (curCount > 0) {
+      count = await kv.decr(cKey(id)); // turunkan di KV
     } else {
-      // kalau sudah 0, jangan di-decr lagi
-      await kv.decr(userFlagKey).catch(() => 0);
-      count = 0;
+      count = 0; // jangan negatif
     }
+    await kv.decr(userFlagKey);
     liked = false;
+  } else {
+    // LIKE
+    count = await kv.incr(cKey(id)); // naikkan di KV
+    await kv.incr(userFlagKey);
+    liked = true;
   }
 
- return NextResponse.json({ success: true, liked, count }, { headers: res.headers });
+  // kirim JSON + bawa header dari 'res' (supaya set-cookie terkirim)
+  return NextResponse.json(
+    { success: true, liked, count, author },
+    { headers: res.headers }
+  );
+}
