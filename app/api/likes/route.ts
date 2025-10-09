@@ -1,50 +1,31 @@
-// app/api/likes/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import kv from "@/lib/kv";
-import { getUserIdFromCookies, ensureUserIdCookie } from "@/lib/user-id";
+import { getUserIdFromCookies } from "@/lib/user-id";
 
-/**
- * GET /api/likes?ids=id1,id2,id3
- * Mengembalikan: { success, data: { [id]: { count, liked } } }
- * - count global diambil dari KV
- * - liked berdasar cookie user anonim (per browser)
- */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const idsParam = (searchParams.get("ids") || "").trim();
-    if (!idsParam) return NextResponse.json({ success: true, data: {} });
-
-    const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
-    if (ids.length === 0) return NextResponse.json({ success: true, data: {} });
-
-    // pastikan kita punya userId (untuk status liked)
-    const userId = getUserIdFromCookies() || ensureUserIdCookie();
-    const likedKey = `likes:user:${userId}`;
-
-    // ambil set yang sudah di-like user ini
-    let likedSet = new Set<string>();
-    try {
-      const arr = (await kv.smembers<string[]>(likedKey)) || [];
-      likedSet = new Set(arr as string[]);
-    } catch {
-      // ignore
+    const ids = idsParam ? idsParam.split(",").map(s => s.trim()).filter(Boolean) : [];
+    if (ids.length === 0) {
+      return NextResponse.json({ success: true, data: {} });
     }
 
-    // ambil count secara batch
-    const countKeys = ids.map((id) => `likes:count:${id}`);
-    const counts = (await kv.mget(...countKeys)) as (string | number | null)[];
+    const uid = await getUserIdFromCookies(); // <- AWAIT di sini
+    const data: Record<string, { count: number; liked: boolean }> = {};
 
-    const out: Record<string, { count: number; liked: boolean }> = {};
-    ids.forEach((id, i) => {
-      const v = counts[i];
-      const n = typeof v === "number" ? v : v ? Number(v) : 0;
-      out[id] = { count: n || 0, liked: likedSet.has(id) };
-    });
+    for (const id of ids) {
+      const count = Number((await kv.get<number>(`likes:count:${id}`)) || 0);
+      let liked = false;
+      if (uid) {
+        liked = Boolean(await kv.sismember(`likes:user:${uid}`, id));
+      }
+      data[id] = { count, liked };
+    }
 
-    return NextResponse.json({ success: true, data: out });
+    return NextResponse.json({ success: true, data });
   } catch (err: any) {
     console.error(err);
-    return NextResponse.json({ success: false, error: err?.message || "Failed" }, { status: 400 });
+    return NextResponse.json({ success: false, error: err?.message || "Error" }, { status: 400 });
   }
 }
