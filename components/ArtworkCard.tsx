@@ -18,9 +18,9 @@ export default function ArtworkCard({
   onLike,
 }: {
   item: Artwork;
-  onLike: (id: string) => void | Promise<void>;
+  onLike: (id: string) => Promise<void>;
 }) {
-  const [liked, setLiked] = useState(Boolean(item.liked));
+  const [liked, setLiked] = useState(!!item.liked);
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [burst, setBurst] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -30,7 +30,6 @@ export default function ArtworkCard({
     setBusy(true);
 
     const next = !liked;
-    // optimistic
     setLiked(next);
     setLikes(n => Math.max(0, n + (next ? 1 : -1)));
     if (next) {
@@ -50,10 +49,9 @@ export default function ArtworkCard({
     }
   }
 
-  const xHandle = (item.x ?? "").replace(/^@/, "");
-
   return (
-    <div className="glass rounded-2xl p-3 card-hover flex flex-col">
+    <div className="glass rounded-2xl p-3 card-hover flex flex-col relative">
+      {/* Gambar */}
       <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
         <img src={item.url} alt={item.title} className="w-full h-full object-contain" />
       </div>
@@ -65,10 +63,10 @@ export default function ArtworkCard({
           {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${xHandle}`, "_blank")}
+              onClick={() => window.open(`https://x.com/${(item.x ?? "").replace(/^@/, "")}`, "_blank")}
               title="Open X profile"
             >
-              @{xHandle}
+              @{(item.x ?? "").replace(/^@/, "")}
             </button>
           )}
 
