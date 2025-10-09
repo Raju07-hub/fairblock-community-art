@@ -1,34 +1,50 @@
+// app/api/likes/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import kv from "@/lib/kv";
-import { getUserIdFromCookies } from "@/lib/user-id";
+import { getUserIdFromCookies, ensureUserIdCookie } from "@/lib/user-id";
 
-/** GET /api/likes?ids=id1,id2,id3 */
+/**
+ * GET /api/likes?ids=id1,id2,id3
+ * Mengembalikan: { success, data: { [id]: { count, liked } } }
+ * - count global diambil dari KV
+ * - liked berdasar cookie user anonim (per browser)
+ */
 export async function GET(req: NextRequest) {
   try {
-    const ids = (req.nextUrl.searchParams.get("ids") || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const { searchParams } = new URL(req.url);
+    const idsParam = (searchParams.get("ids") || "").trim();
+    if (!idsParam) return NextResponse.json({ success: true, data: {} });
 
-    if (ids.length === 0) {
-      return NextResponse.json({ success: true, data: {} });
-    }
+    const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 0) return NextResponse.json({ success: true, data: {} });
 
-    const userId = await getUserIdFromCookies();
+    // pastikan kita punya userId (untuk status liked)
+    const userId = getUserIdFromCookies() || ensureUserIdCookie();
     const likedKey = `likes:user:${userId}`;
 
-    const counts = await Promise.all(
-      ids.map((id) => kv.get<string | number>(`likes:count:${id}`))
-    );
-    const likedFlags = await Promise.all(ids.map((id) => kv.sismember(likedKey, id)));
+    // ambil set yang sudah di-like user ini
+    let likedSet = new Set<string>();
+    try {
+      const arr = (await kv.smembers<string[]>(likedKey)) || [];
+      likedSet = new Set(arr as string[]);
+    } catch {
+      // ignore
+    }
 
-    const data: Record<string, { count: number; liked: boolean }> = {};
+    // ambil count secara batch
+    const countKeys = ids.map((id) => `likes:count:${id}`);
+    const counts = (await kv.mget(...countKeys)) as (string | number | null)[];
+
+    const out: Record<string, { count: number; liked: boolean }> = {};
     ids.forEach((id, i) => {
-      data[id] = { count: Number(counts[i] ?? 0), liked: !!likedFlags[i] };
+      const v = counts[i];
+      const n = typeof v === "number" ? v : v ? Number(v) : 0;
+      out[id] = { count: n || 0, liked: likedSet.has(id) };
     });
 
-    return NextResponse.json({ success: true, data });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e?.message || "error" }, { status: 400 });
+    return NextResponse.json({ success: true, data: out });
+  } catch (err: any) {
+    console.error(err);
+    return NextResponse.json({ success: false, error: err?.message || "Failed" }, { status: 400 });
   }
 }
