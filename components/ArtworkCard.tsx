@@ -64,10 +64,12 @@ export default function ArtworkCard({
           {item.x && (
             <button
               className="btn-ghost text-sm px-3 py-1"
-              onClick={() => window.open(`https://x.com/${item.x.replace(/^@/, "")}`, "_blank")}
+              onClick={() =>
+                window.open(`https://x.com/${item.x?.replace(/^@/, "")}`, "_blank")
+              }
               title="Open X profile"
             >
-              @{item.x.replace(/^@/, "")}
+              @{item.x?.replace(/^@/, "")}
             </button>
           )}
 
