@@ -1,7 +1,7 @@
 // app/api/blob/route.ts
 import { handleUpload } from "@vercel/blob/client";
 
-export const runtime = "edge";            // ← run this on the Edge for the proper Web Response type
+export const runtime = "edge";            // gunakan Web Response (cocok dengan handleUpload)
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {
@@ -12,18 +12,10 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  // handleUpload returns a Web Response in runtime 'edge', but TS types can be too strict in Next 15.
-  // We cast to Response to satisfy Next's RouteHandlerConfig.
-  const res = await handleUpload(req, {
-    token: process.env.BLOB_READ_WRITE_TOKEN!,
-    access: "public",
-    endpoint: "fairblock/uploads",
-    onBeforeGenerateToken: async () => ({
-      maximumSizeInBytes: 20 * 1024 * 1024,  // allow up to 20MB
-      contentType: ["image/png", "image/jpeg", "image/webp"],
-    }),
-    // onUploadCompleted is optional; metadata is handled by /api/submit-meta
-  });
+  // Versi paket kamu menerima SATU argumen saja.
+  // Default behavior sudah cukup untuk direct-to-blob.
+  const res = await handleUpload(req);
 
+  // Cast agar lolos tipe Next 15
   return res as unknown as Response;
 }
