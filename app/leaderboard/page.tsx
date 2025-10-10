@@ -23,8 +23,8 @@ function nextDailyResetUTC(now = new Date()): Date {
 }
 function nextWeeklyResetUTC_Saturday(now = new Date()): Date {
   const todayMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0);
-  const day = new Date(todayMidnight).getUTCDay(); // 0..6 (Sun..Sat)
-  let daysAhead = (6 - day + 7) % 7;               // distance to Saturday
+  const day = new Date(todayMidnight).getUTCDay();
+  let daysAhead = (6 - day + 7) % 7;
   let target = new Date(todayMidnight + daysAhead * DAY);
   if (now.getTime() >= target.getTime()) target = new Date(target.getTime() + WEEK);
   return target;
@@ -91,12 +91,6 @@ export default function LeaderboardPage() {
     return m;
   }, [gallery]);
 
-  const topCreators = useMemo(() => {
-    const arr = Array.from(uploadsByCreator.entries()).map(([creator, score]) => ({ creator, score }));
-    arr.sort((a, b) => b.score - a.score);
-    return arr.slice(0, 10);
-  }, [uploadsByCreator]);
-
   const resetLabel =
     range === "weekly"
       ? "Weekly reset: every Saturday at 00:00 UTC+7"
@@ -130,8 +124,8 @@ export default function LeaderboardPage() {
       ) : !lb?.success ? (
         <p className="text-white/70">Failed to load.</p>
       ) : (
-        <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2fr)_minmax(0,1fr)] gap-6">
-          {/* --- Top Art (wider) --- */}
+        <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.3fr)_minmax(0,0.9fr)] gap-6">
+          {/* --- Top Art (wider & larger image) --- */}
           <section>
             <h2 className={heading}>🏆 Top Art (Top 10)</h2>
             <div className="space-y-3">
@@ -146,11 +140,11 @@ export default function LeaderboardPage() {
                   const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
 
                   return (
-                    <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
-                      <div className="flex items-center gap-4 min-w-0">
+                    <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-6 md:p-7">
+                      <div className="flex items-center gap-5 min-w-0">
                         <span className="w-7 text-center opacity-70">{idx + 1}.</span>
 
-                        <div className="w-24 h-24 sm:w-28 sm:h-28 md:w-36 md:h-36 rounded-2xl overflow-hidden bg-white/10 shrink-0">
+                        <div className="w-32 h-32 sm:w-40 sm:h-40 md:w-48 md:h-48 rounded-3xl overflow-hidden bg-white/10 shrink-0 shadow-lg">
                           {g?.url ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -158,6 +152,8 @@ export default function LeaderboardPage() {
                               alt={g?.title || "Artwork"}
                               className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
                               loading="lazy"
+                              decoding="async"
+                              fetchPriority="high"
                               onError={(e) => (e.currentTarget.style.display = "none")}
                             />
                           ) : (
@@ -177,13 +173,12 @@ export default function LeaderboardPage() {
                               </>
                             )}
                           </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
+                          <div className="mt-3 flex flex-wrap gap-2">
                             <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
                             {handle && <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btn}>Open X Profile</a>}
                           </div>
                         </div>
                       </div>
-
                       <span className={badge}>{t.score}</span>
                     </div>
                   );
@@ -191,7 +186,7 @@ export default function LeaderboardPage() {
             </div>
           </section>
 
-          {/* --- Top Creators (narrower) --- */}
+          {/* --- Top Creators (narrow) --- */}
           <section>
             <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
             <div className="space-y-3">
