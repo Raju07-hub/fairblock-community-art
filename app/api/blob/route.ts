@@ -13,9 +13,10 @@ export async function POST() {
     );
   }
 
-  // Gunakan nama baru sesuai versi library
+  // ✅ field `pathname` wajib sekarang (boleh apa saja, folder upload)
   const token = await generateClientTokenFromReadWriteToken({
     token: rw,
+    pathname: "fairblock/uploads", // direktori dasar untuk semua upload
     allowedContentTypes: ["image/png", "image/jpeg", "image/webp"],
     maximumSizeInBytes: 20 * 1024 * 1024, // max 20MB
   });
