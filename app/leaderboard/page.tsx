@@ -15,7 +15,6 @@ function handleFromItem(it: GalleryItem): string {
   return d ? `@${d}` : "";
 }
 
-// ------------ countdown helpers (UTC) ------------
 const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
 function nextDailyResetUTC(now = new Date()): Date {
   const targetMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
@@ -37,7 +36,6 @@ function formatDuration(ms: number): string {
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
-// -------------------------------------------------
 
 export default function LeaderboardPage() {
   const [range, setRange] = useState<"daily" | "weekly">("daily");
@@ -124,8 +122,8 @@ export default function LeaderboardPage() {
       ) : !lb?.success ? (
         <p className="text-white/70">Failed to load.</p>
       ) : (
-        <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.3fr)_minmax(0,0.9fr)] gap-6">
-          {/* --- Top Art (wider & larger image) --- */}
+        <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.2fr)_minmax(0,0.9fr)] gap-6">
+          {/* --- Top Art (slightly smaller image, no X button) --- */}
           <section>
             <h2 className={heading}>🏆 Top Art (Top 10)</h2>
             <div className="space-y-3">
@@ -140,11 +138,11 @@ export default function LeaderboardPage() {
                   const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
 
                   return (
-                    <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-6 md:p-7">
-                      <div className="flex items-center gap-5 min-w-0">
+                    <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
+                      <div className="flex items-center gap-4 min-w-0">
                         <span className="w-7 text-center opacity-70">{idx + 1}.</span>
 
-                        <div className="w-32 h-32 sm:w-40 sm:h-40 md:w-48 md:h-48 rounded-3xl overflow-hidden bg-white/10 shrink-0 shadow-lg">
+                        <div className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl overflow-hidden bg-white/10 shrink-0 shadow-md">
                           {g?.url ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -175,7 +173,6 @@ export default function LeaderboardPage() {
                           </div>
                           <div className="mt-3 flex flex-wrap gap-2">
                             <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
-                            {handle && <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btn}>Open X Profile</a>}
                           </div>
                         </div>
                       </div>
