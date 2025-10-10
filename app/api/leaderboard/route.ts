@@ -1,8 +1,9 @@
-// app/api/leaderboard/route.ts
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
 
-function pad(n: number) { return n < 10 ? `0${n}` : `${n}`; }
+function pad(n: number) {
+  return n < 10 ? `0${n}` : `${n}`;
+}
 
 function isoDateUTC(d = new Date()) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
@@ -49,16 +50,22 @@ export async function GET(req: Request) {
   const keys = zkey(period);
 
   try {
-    const rawArts = (await (kv as any).zrange(keys.art, 0, 9, { rev: true, withScores: true }))
-      as Array<{ member: string; score: number }> | (string | number)[];
-    const rawCreators = (await (kv as any).zrange(keys.creator, 0, 9, { rev: true, withScores: true }))
-      as Array<{ member: string; score: number }> | (string | number)[];
+    // ✅ FIXED casting — buat satu baris penuh agar tidak error Turbopack
+    const rawArts =
+      (await (kv as any).zrange(keys.art, 0, 9, { rev: true, withScores: true })) as
+      Array<{ member: string; score: number }> | Array<string | number>;
 
-    function normalize(raw: Array<{ member: string; score: number }> | (string | number)[]) {
+    const rawCreators =
+      (await (kv as any).zrange(keys.creator, 0, 9, { rev: true, withScores: true })) as
+      Array<{ member: string; score: number }> | Array<string | number>;
+
+    function normalize(raw: Array<{ member: string; score: number }> | Array<string | number>) {
       if (!Array.isArray(raw) || raw.length === 0) return [] as { member: string; score: number }[];
       if (typeof raw[0] === "object") return raw as Array<{ member: string; score: number }>;
       const out: { member: string; score: number }[] = [];
-      for (let i = 0; i < raw.length; i += 2) out.push({ member: String(raw[i]), score: Number(raw[i + 1] || 0) });
+      for (let i = 0; i < raw.length; i += 2) {
+        out.push({ member: String(raw[i]), score: Number(raw[i + 1] || 0) });
+      }
       return out;
     }
 
@@ -70,8 +77,7 @@ export async function GET(req: Request) {
       period,
       topArts,
       topCreators,
-      // aliases for backward-compat
-      arts: topArts,
+      arts: topArts, // backward compatibility
       creators: topCreators,
     });
   } catch (e) {
