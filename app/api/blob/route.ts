@@ -5,25 +5,24 @@ export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    return new Response(
-      JSON.stringify({ error: "Missing BLOB_READ_WRITE_TOKEN" }),
-      { status: 500, headers: { "content-type": "application/json" } }
-    );
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
+    return new Response(JSON.stringify({ error: "Missing BLOB_READ_WRITE_TOKEN" }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
   }
 
-  // Versi type di project kamu mewajibkan "body" di options.
-  // Kita cast supaya kompatibel dengan implementasi runtime yang benar.
-  const uploadHandler = handleUpload as unknown as (opts: any) => Promise<Response>;
-
-  const res = await uploadHandler({
+  // Beberapa versi @vercel/blob punya perbedaan tipe.
+  // Opsi di bawah sudah kompatibel dan membatasi ukuran/tipe file.
+  const res = await (handleUpload as unknown as (opts: any) => Promise<Response>)({
     request: req,
-    token: process.env.BLOB_READ_WRITE_TOKEN!,
+    token,
     onBeforeGenerateToken: async () => ({
-      maximumSizeInBytes: 20 * 1024 * 1024, // allow up to 20MB
+      maximumSizeInBytes: 20 * 1024 * 1024, // hingga 20MB
       allowedContentTypes: ["image/png", "image/jpeg", "image/webp"],
     }),
-    // Tambahkan body dummy agar lolos tipe lama yang mewajibkan field ini
+    // field dummy agar lolos varian tipe yang mengharuskan "body"
     body: undefined,
   });
 
