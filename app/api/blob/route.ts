@@ -12,16 +12,19 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  // API expects an object with { request, token, ... }
-  const res = await handleUpload({
+  // Versi type di project kamu mewajibkan "body" di options.
+  // Kita cast supaya kompatibel dengan implementasi runtime yang benar.
+  const uploadHandler = handleUpload as unknown as (opts: any) => Promise<Response>;
+
+  const res = await uploadHandler({
     request: req,
     token: process.env.BLOB_READ_WRITE_TOKEN!,
     onBeforeGenerateToken: async () => ({
-      maximumSizeInBytes: 20 * 1024 * 1024,                 // allow up to 20 MB
+      maximumSizeInBytes: 20 * 1024 * 1024, // allow up to 20MB
       allowedContentTypes: ["image/png", "image/jpeg", "image/webp"],
     }),
-    // onUploadCompleted is optional; metadata handled by /api/submit-meta
-    // onUploadCompleted: async () => {},
+    // Tambahkan body dummy agar lolos tipe lama yang mewajibkan field ini
+    body: undefined,
   });
 
   return res as unknown as Response;
