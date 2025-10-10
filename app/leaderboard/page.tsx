@@ -15,7 +15,7 @@ function handleFromItem(it: GalleryItem): string {
   return d ? `@${d}` : "";
 }
 
-// ====== countdown helpers (tetap) ======
+// ------------ countdown helpers (UTC) ------------
 const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
 function nextDailyResetUTC(now = new Date()): Date {
   const targetMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
@@ -23,8 +23,8 @@ function nextDailyResetUTC(now = new Date()): Date {
 }
 function nextWeeklyResetUTC_Saturday(now = new Date()): Date {
   const todayMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0);
-  const day = new Date(todayMidnight).getUTCDay();
-  let daysAhead = (6 - day + 7) % 7;
+  const day = new Date(todayMidnight).getUTCDay(); // 0..6 (Sun..Sat)
+  let daysAhead = (6 - day + 7) % 7;               // distance to Saturday
   let target = new Date(todayMidnight + daysAhead * DAY);
   if (now.getTime() >= target.getTime()) target = new Date(target.getTime() + WEEK);
   return target;
@@ -37,6 +37,7 @@ function formatDuration(ms: number): string {
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
+// -------------------------------------------------
 
 export default function LeaderboardPage() {
   const [range, setRange] = useState<"daily" | "weekly">("daily");
@@ -46,7 +47,7 @@ export default function LeaderboardPage() {
   const [countdown, setCountdown] = useState("--:--:--");
 
   const btn = "btn px-4 py-1 rounded-full text-sm";
-  const btnSm = "btn px-3 py-1 rounded-full text-xs"; // untuk kolom kanan yang diperkecil
+  const btnSm = "btn px-3 py-1 rounded-full text-xs";
   const badge = "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
   const badgeSm = "px-2.5 py-0.5 rounded-full text-xs font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
   const heading = "text-2xl font-bold mb-3 text-[#3aaefc]";
@@ -96,9 +97,10 @@ export default function LeaderboardPage() {
     return arr.slice(0, 10);
   }, [uploadsByCreator]);
 
-  const resetLabel = range === "weekly"
-    ? "Weekly reset: every Saturday at 00:00 UTC+7"
-    : "Daily reset: every day at 00:00 UTC+7";
+  const resetLabel =
+    range === "weekly"
+      ? "Weekly reset: every Saturday at 00:00 UTC+7"
+      : "Daily reset: every day at 00:00 UTC+7";
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
@@ -128,77 +130,96 @@ export default function LeaderboardPage() {
       ) : !lb?.success ? (
         <p className="text-white/70">Failed to load.</p>
       ) : (
-        // ⬇️ WIDEN LEFT COLUMN, SHRINK RIGHT COLUMN
         <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,1.7fr)_minmax(0,1fr)] gap-6">
           {/* --- Top Art (wider) --- */}
           <section>
             <h2 className={heading}>🏆 Top Art (Top 10)</h2>
             <div className="space-y-3">
-              {lb.topArts.slice(0, 10).map((t, idx) => {
-                const g = byId.get(t.id);
-                const handle = g ? handleFromItem(g) : "";
-                const handleNoAt = handle.replace(/^@/, "");
-                const xUrl = handleNoAt ? `https://x.com/${handleNoAt}` : "";
-                const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
+              {lb.topArts
+                .filter(t => byId.has(t.id))
+                .slice(0, 10)
+                .map((t, idx) => {
+                  const g = byId.get(t.id)!;
+                  const handle = handleFromItem(g);
+                  const handleNoAt = handle.replace(/^@/, "");
+                  const xUrl = handleNoAt ? `https://x.com/${handleNoAt}` : "";
+                  const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
 
-                return (
-                  <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-4">
-                    <div className="flex items-center gap-4 min-w-0">
-                      <span className="w-7 text-center opacity-70">{idx + 1}.</span>
-                      {/* bigger thumbnail to avoid pixel look */}
-                      <div className="w-20 h-20 rounded-xl overflow-hidden bg-white/10 shrink-0">
-                        {g && <img src={g.url} alt={g.title} className="w-full h-full object-cover" loading="lazy" />}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="font-medium truncate text-base">
-                          {g?.title || "Untitled"}{" "}
-                          {handle && (
-                            <>
-                              <span className="opacity-70">by</span>{" "}
-                              <a href={xUrl} target="_blank" rel="noopener noreferrer" className="underline text-[#4af2ff]">
-                                {handle}
-                              </a>
-                            </>
+                  return (
+                    <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-4">
+                      <div className="flex items-center gap-4 min-w-0">
+                        <span className="w-7 text-center opacity-70">{idx + 1}.</span>
+
+                        <div className="w-20 h-20 rounded-xl overflow-hidden bg-white/10 shrink-0 flex items-center justify-center">
+                          {g?.url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={g.url}
+                              alt={g?.title || "Artwork"}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                              onError={(e) => (e.currentTarget.style.display = "none")}
+                            />
+                          ) : (
+                            <span className="text-xs opacity-50">No Image</span>
                           )}
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
-                          {handle && <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btn}>Open X Profile</a>}
+
+                        <div className="min-w-0">
+                          <div className="font-medium truncate text-base">
+                            {g?.title || "Untitled"}{" "}
+                            {handle && (
+                              <>
+                                <span className="opacity-70">by</span>{" "}
+                                <a href={xUrl} target="_blank" rel="noopener noreferrer" className="underline text-[#4af2ff]">
+                                  {handle}
+                                </a>
+                              </>
+                            )}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
+                            {handle && <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btn}>Open X Profile</a>}
+                          </div>
                         </div>
                       </div>
+
+                      <span className={badge}>{t.score}</span>
                     </div>
-                    <span className={badge}>{t.score}</span>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </section>
 
-          {/* --- Top Creators (narrower/compact) --- */}
+          {/* --- Top Creators (narrower) --- */}
           <section>
             <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
             <div className="space-y-3">
-              {topCreators.map((c, idx) => {
-                const handle = c.creator.startsWith("@") ? c.creator : `@${c.creator}`;
-                const galleryLink = `/gallery?q=${encodeURIComponent(handle)}`;
-                const xUrl = `https://x.com/${handle.replace(/^@/, "")}`;
-                return (
-                  <div key={handle} className="flex items-center justify-between bg-white/5 rounded-xl p-2.5">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="w-6 text-center opacity-70 text-sm">{idx + 1}.</span>
-                      <div className="min-w-0">
-                        <div className="font-medium truncate text-[15px]">{handle}</div>
-                        <div className="text-xs opacity-60">Uploads: {c.score}</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={galleryLink} className={btnSm}>Search on Gallery</Link>
-                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btnSm}>Open X Profile</a>
+              {Array.from(uploadsByCreator.entries())
+                .map(([creator, score]) => ({ creator, score }))
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10)
+                .map((c, idx) => {
+                  const handle = c.creator.startsWith("@") ? c.creator : `@${c.creator}`;
+                  const galleryLink = `/gallery?q=${encodeURIComponent(handle)}`;
+                  const xUrl = `https://x.com/${handle.replace(/^@/, "")}`;
+                  return (
+                    <div key={handle} className="flex items-center justify-between bg-white/5 rounded-xl p-2.5">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="w-6 text-center opacity-70 text-sm">{idx + 1}.</span>
+                        <div className="min-w-0">
+                          <div className="font-medium truncate text-[15px]">{handle}</div>
+                          <div className="text-xs opacity-60">Uploads: {c.score}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <Link href={galleryLink} className={btnSm}>Search on Gallery</Link>
+                            <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btnSm}>Open X Profile</a>
+                          </div>
                         </div>
                       </div>
+                      <span className={badgeSm}>{c.score}</span>
                     </div>
-                    <span className={badgeSm}>{c.score}</span>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </section>
         </div>

@@ -1,3 +1,4 @@
+// app/api/admin/reset-likes/route.ts
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
 
@@ -28,8 +29,8 @@ export async function POST(req: Request) {
 
   let removed = 0;
 
-  // 1) sapu kasar semua awalan like/likes dan leaderboard caches
-  const broadPatterns = [
+  // 1) broad sweep
+  const broad = [
     "like:*",
     "likes:*",
     "lb:art:daily:*",
@@ -37,27 +38,20 @@ export async function POST(req: Request) {
     "lb:creator:daily:*",
     "lb:creator:weekly:*",
   ];
-  for (const p of broadPatterns) removed += await scanDel(p);
+  for (const p of broad) removed += await scanDel(p);
 
-  // 2) sapu spesifik berdasarkan semua ID di gallery (jaga-jaga kalau format keynya unik)
+  // 2) per-ID sweep (jaga-jaga)
   try {
     const resp = await fetch(new URL("/api/gallery", req.url), { cache: "no-store" });
     const j = await resp.json().catch(() => ({}));
     const items: Array<{ id: string }> = j?.items ?? [];
     for (const it of items) {
       const id = it.id;
-      // hapus semua key yang mengandung ID ini di namespace umum
-      const patternsForId = [
-        `like:*${id}*`,
-        `likes:*${id}*`,
-        `who:*${id}*`,
-        `heart:*${id}*`,
-      ];
-      for (const p of patternsForId) removed += await scanDel(p);
+      for (const p of [`like:*${id}*`, `likes:*${id}*`, `who:*${id}*`, `heart:*${id}*`]) {
+        removed += await scanDel(p);
+      }
     }
-  } catch {
-    // aman di-skip; langkah 1 biasanya sudah cukup
-  }
+  } catch {}
 
   return NextResponse.json({ success: true, removed });
 }
