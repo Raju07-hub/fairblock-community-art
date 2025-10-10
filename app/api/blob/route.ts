@@ -1,7 +1,7 @@
 // app/api/blob/route.ts
 import { handleUpload } from "@vercel/blob/client";
 
-export const runtime = "edge";            // gunakan Web Response (cocok dengan handleUpload)
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {
@@ -12,10 +12,23 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  // Versi paket kamu menerima SATU argumen saja.
-  // Default behavior sudah cukup untuk direct-to-blob.
-  const res = await handleUpload(req);
+  // Versi API: handleUpload({ request, token, ...callbacks })
+  const res = await handleUpload({
+    request: req,
+    token: process.env.BLOB_READ_WRITE_TOKEN!,
+    // validasi sebelum client dapat token upload
+    onBeforeGenerateToken: async () => ({
+      maximumSizeInBytes: 20 * 1024 * 1024, // izinkan sampai 20MB
+      allowedContentTypes: ["image/png", "image/jpeg", "image/webp"],
+    }),
+    // opsional: dipanggil saat upload selesai (metadata tetap di /api/submit-meta)
+    onUploadCompleted: async () => {
+      // no-op
+    },
+    // public agar bisa dipakai langsung di Gallery
+    // catatan: di beberapa versi, access diset di client; kalau perlu bisa hilangkan baris ini
+    access: "public" as const,
+  });
 
-  // Cast agar lolos tipe Next 15
   return res as unknown as Response;
 }
