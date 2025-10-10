@@ -15,44 +15,40 @@ function handleFromItem(it: GalleryItem): string {
   return d ? `@${d}` : "";
 }
 
-// ---------- Countdown helpers (UTC based) ----------
+// ====== countdown helpers (tetap) ======
 const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
-
 function nextDailyResetUTC(now = new Date()): Date {
-  // Next 00:00 UTC
   const targetMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
   return new Date(targetMs);
 }
-
 function nextWeeklyResetUTC_Saturday(now = new Date()): Date {
-  // Weekly reset every Saturday 00:00 UTC
   const todayMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0);
-  const day = new Date(todayMidnight).getUTCDay(); // 0=Sun..6=Sat
-  let daysAhead = (6 - day + 7) % 7; // distance to Saturday
+  const day = new Date(todayMidnight).getUTCDay();
+  let daysAhead = (6 - day + 7) % 7;
   let target = new Date(todayMidnight + daysAhead * DAY);
   if (now.getTime() >= target.getTime()) target = new Date(target.getTime() + WEEK);
   return target;
 }
-
 function formatDuration(ms: number): string {
   if (ms < 0) ms = 0;
-  const sec = Math.floor(ms / MS) % 60;
-  const min = Math.floor(ms / (60 * MS)) % 60;
-  const hrs = Math.floor(ms / (3600 * MS));
+  const s = Math.floor(ms / MS) % 60;
+  const m = Math.floor(ms / (60 * MS)) % 60;
+  const h = Math.floor(ms / (3600 * MS));
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-  return `${pad(hrs)}:${pad(min)}:${pad(sec)}`;
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
-// ---------------------------------------------------
 
 export default function LeaderboardPage() {
   const [range, setRange] = useState<"daily" | "weekly">("daily");
   const [loading, setLoading] = useState(true);
   const [lb, setLb] = useState<LbResp | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
-  const [countdown, setCountdown] = useState<string>("--:--:--");
+  const [countdown, setCountdown] = useState("--:--:--");
 
   const btn = "btn px-4 py-1 rounded-full text-sm";
+  const btnSm = "btn px-3 py-1 rounded-full text-xs"; // untuk kolom kanan yang diperkecil
   const badge = "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
+  const badgeSm = "px-2.5 py-0.5 rounded-full text-xs font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
   const heading = "text-2xl font-bold mb-3 text-[#3aaefc]";
 
   async function load(currentRange: "daily" | "weekly") {
@@ -71,17 +67,15 @@ export default function LeaderboardPage() {
 
   useEffect(() => { load(range); }, [range]);
 
-  // Tick countdown setiap detik
   useEffect(() => {
-    function compute() {
+    function tick() {
       const now = new Date();
-      const target =
-        range === "weekly" ? nextWeeklyResetUTC_Saturday(now) : nextDailyResetUTC(now);
+      const target = range === "weekly" ? nextWeeklyResetUTC_Saturday(now) : nextDailyResetUTC(now);
       setCountdown(formatDuration(target.getTime() - now.getTime()));
     }
-    compute();
-    const t = setInterval(compute, 1000);
-    return () => clearInterval(t);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
   }, [range]);
 
   const byId = useMemo(() => new Map(gallery.map(it => [it.id, it])), [gallery]);
@@ -102,20 +96,18 @@ export default function LeaderboardPage() {
     return arr.slice(0, 10);
   }, [uploadsByCreator]);
 
-  // Label info sesuai range
-  const resetLabel =
-  range === "weekly"
+  const resetLabel = range === "weekly"
     ? "Weekly reset: every Saturday at 00:00 UTC+7"
     : "Daily reset: every day at 00:00 UTC+7";
+
   return (
-    <div className="max-w-6xl mx-auto px-5 sm:px-6 py-10">
+    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
       <div className="flex items-center justify-between mb-6 gap-3">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
           <Link href="/gallery" className="btn">🖼️ Gallery</Link>
           <Link href="/submit" className="btn">＋ Submit</Link>
         </div>
-
         <div className="flex items-center gap-2">
           <div className="hidden sm:flex flex-col items-end mr-2">
             <span className="text-xs opacity-70">{resetLabel}</span>
@@ -136,8 +128,9 @@ export default function LeaderboardPage() {
       ) : !lb?.success ? (
         <p className="text-white/70">Failed to load.</p>
       ) : (
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* --- Top Art --- */}
+        // ⬇️ WIDEN LEFT COLUMN, SHRINK RIGHT COLUMN
+        <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,1.7fr)_minmax(0,1fr)] gap-6">
+          {/* --- Top Art (wider) --- */}
           <section>
             <h2 className={heading}>🏆 Top Art (Top 10)</h2>
             <div className="space-y-3">
@@ -149,14 +142,15 @@ export default function LeaderboardPage() {
                 const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
 
                 return (
-                  <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
-                    <div className="flex items-center gap-3 min-w-0">
+                  <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-4">
+                    <div className="flex items-center gap-4 min-w-0">
                       <span className="w-7 text-center opacity-70">{idx + 1}.</span>
-                      <div className="w-14 h-14 rounded-lg overflow-hidden bg-white/10 shrink-0">
+                      {/* bigger thumbnail to avoid pixel look */}
+                      <div className="w-20 h-20 rounded-xl overflow-hidden bg-white/10 shrink-0">
                         {g && <img src={g.url} alt={g.title} className="w-full h-full object-cover" loading="lazy" />}
                       </div>
                       <div className="min-w-0">
-                        <div className="font-medium truncate">
+                        <div className="font-medium truncate text-base">
                           {g?.title || "Untitled"}{" "}
                           {handle && (
                             <>
@@ -180,7 +174,7 @@ export default function LeaderboardPage() {
             </div>
           </section>
 
-          {/* --- Top Creators --- */}
+          {/* --- Top Creators (narrower/compact) --- */}
           <section>
             <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
             <div className="space-y-3">
@@ -188,21 +182,20 @@ export default function LeaderboardPage() {
                 const handle = c.creator.startsWith("@") ? c.creator : `@${c.creator}`;
                 const galleryLink = `/gallery?q=${encodeURIComponent(handle)}`;
                 const xUrl = `https://x.com/${handle.replace(/^@/, "")}`;
-
                 return (
-                  <div key={handle} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
+                  <div key={handle} className="flex items-center justify-between bg-white/5 rounded-xl p-2.5">
                     <div className="flex items-center gap-3 min-w-0">
-                      <span className="w-7 text-center opacity-70">{idx + 1}.</span>
+                      <span className="w-6 text-center opacity-70 text-sm">{idx + 1}.</span>
                       <div className="min-w-0">
-                        <div className="font-medium truncate">{handle}</div>
+                        <div className="font-medium truncate text-[15px]">{handle}</div>
                         <div className="text-xs opacity-60">Uploads: {c.score}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={galleryLink} className={btn}>Search on Gallery</Link>
-                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btn}>Open X Profile</a>
+                          <Link href={galleryLink} className={btnSm}>Search on Gallery</Link>
+                          <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btnSm}>Open X Profile</a>
                         </div>
                       </div>
                     </div>
-                    <span className={badge}>{c.score}</span>
+                    <span className={badgeSm}>{c.score}</span>
                   </div>
                 );
               })}
