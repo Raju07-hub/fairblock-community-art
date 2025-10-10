@@ -1,30 +1,31 @@
-// app/api/blob/route.ts
-import { handleUpload } from "@vercel/blob/client";
+import { handleUpload } from "@vercel/blob";
+import { NextResponse } from "next/server";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: Request): Promise<Response> {
+export async function POST(req: Request) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
+
   if (!token) {
-    return new Response(JSON.stringify({ error: "Missing BLOB_READ_WRITE_TOKEN" }), {
-      status: 500,
-      headers: { "content-type": "application/json" },
-    });
+    return NextResponse.json({ error: "Missing BLOB_READ_WRITE_TOKEN" }, { status: 500 });
   }
 
-  // Beberapa versi @vercel/blob punya perbedaan tipe.
-  // Opsi di bawah sudah kompatibel dan membatasi ukuran/tipe file.
-  const res = await (handleUpload as unknown as (opts: any) => Promise<Response>)({
-    request: req,
-    token,
-    onBeforeGenerateToken: async () => ({
-      maximumSizeInBytes: 20 * 1024 * 1024, // hingga 20MB
-      allowedContentTypes: ["image/png", "image/jpeg", "image/webp"],
-    }),
-    // field dummy agar lolos varian tipe yang mengharuskan "body"
-    body: undefined,
-  });
+  try {
+    // handleUpload dari @vercel/blob otomatis generate client token
+    const response = await handleUpload({
+      request: req,
+      token,
+      onBeforeGenerateToken: async () => ({
+        allowedContentTypes: ["image/png", "image/jpeg", "image/webp"],
+        maximumSizeInBytes: 20 * 1024 * 1024, // up to 20 MB
+      }),
+    });
 
-  return res as unknown as Response;
+    // hasil handleUpload langsung response JSON ke client
+    return response as unknown as Response;
+  } catch (err: any) {
+    console.error("Blob upload error:", err);
+    return NextResponse.json({ error: err?.message || "Upload failed" }, { status: 500 });
+  }
 }
