@@ -130,7 +130,7 @@ export default function LeaderboardPage() {
       ) : !lb?.success ? (
         <p className="text-white/70">Failed to load.</p>
       ) : (
-        <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,1.7fr)_minmax(0,1fr)] gap-6">
+        <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2fr)_minmax(0,1fr)] gap-6">
           {/* --- Top Art (wider) --- */}
           <section>
             <h2 className={heading}>🏆 Top Art (Top 10)</h2>
@@ -146,17 +146,17 @@ export default function LeaderboardPage() {
                   const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
 
                   return (
-                    <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-4">
+                    <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
                       <div className="flex items-center gap-4 min-w-0">
                         <span className="w-7 text-center opacity-70">{idx + 1}.</span>
 
-                        <div className="w-20 h-20 rounded-xl overflow-hidden bg-white/10 shrink-0 flex items-center justify-center">
+                        <div className="w-24 h-24 sm:w-28 sm:h-28 md:w-36 md:h-36 rounded-2xl overflow-hidden bg-white/10 shrink-0">
                           {g?.url ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={g.url}
                               alt={g?.title || "Artwork"}
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
                               loading="lazy"
                               onError={(e) => (e.currentTarget.style.display = "none")}
                             />
