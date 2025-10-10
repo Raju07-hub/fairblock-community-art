@@ -1,7 +1,9 @@
+// app/submit/page.tsx
 "use client";
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 
 type TokenRec = {
   metaUrl?: string;
@@ -88,7 +90,8 @@ export default function SubmitPage() {
     if (!out) return original;
 
     // pastikan nama & type
-    const newName = original.name.replace(/\.(png|jpg|jpeg|webp)$/i, "") +
+    const newName =
+      original.name.replace(/\.(png|jpg|jpeg|webp)$/i, "") +
       (targetMime === "image/webp" ? ".webp" : ".jpg");
 
     return new File([out], newName, { type: targetMime, lastModified: Date.now() });
@@ -138,7 +141,7 @@ export default function SubmitPage() {
     setIsDragging(false);
   }
 
-  // ---------- Submit ----------
+  // ---------- Submit (direct-to-blob) ----------
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -152,24 +155,30 @@ export default function SubmitPage() {
 
     setLoading(true);
     try {
+      // 1) Kompres jika perlu
       const toSend = await compressIfNeeded(picked);
 
-      // ganti file di FormData (hapus "file" lama kalau ada)
-      fd.delete("file");
-      fd.append("file", toSend, toSend.name);
+      // 2) Upload langsung ke Vercel Blob (tanpa melewati body API)
+      const { url: imageUrl } = await upload(toSend.name || "artwork", toSend, {
+        access: "public",
+        handleUploadUrl: "/api/blob", // route signer
+      });
 
-      const res = await fetch("/api/submit", { method: "POST", body: fd });
+      // 3) Kirim METADATA (tanpa file) ke server
+      const title = String(fd.get("title") || "").trim();
+      const x = String(fd.get("x") || "").trim();
+      const discord = String(fd.get("discord") || "").trim();
 
-      const text = await res.text();
-      let data: any;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error(text || "Non-JSON response");
-      }
-      if (!res.ok || !data?.success) throw new Error(data?.error || "Upload failed");
+      const res = await fetch("/api/submit-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, x, discord, imageUrl }),
+      });
 
-      // simpan credential delete
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Submit failed");
+
+      // 4) Simpan credential delete (sama seperti sebelumnya)
       try {
         const raw = localStorage.getItem("fairblock_tokens");
         const map: Record<string, TokenRec> = raw ? JSON.parse(raw) : {};
@@ -257,6 +266,7 @@ export default function SubmitPage() {
 
         {preview && (
           <div className="mt-4 flex justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={preview}
               alt="preview"
