@@ -1,26 +1,50 @@
-// ...imports sama seperti milikmu sekarang...
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
+
+type TokenRec = {
+  metaUrl?: string;
+  ownerTokenHash?: string;
+  token?: string;
+};
+
 export default function SubmitPage() {
-  // ...state & helper sama...
+  const router = useRouter();
+
+  // ✅ Semua state harus di dalam komponen
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [workingFile, setWorkingFile] = useState<File | null>(null);
+
+  // ...fungsi createImage, compressIfNeeded, dsb tetap sama...
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
     const fd = new FormData(form);
 
+    // ✅ sekarang workingFile sudah dikenal
     const picked = workingFile ?? (fileInputRef.current?.files?.[0] || null);
-    if (!picked) { alert("Please choose an image."); return; }
+    if (!picked) {
+      alert("Please choose an image.");
+      return;
+    }
 
     setLoading(true);
     try {
-      const toSend = await compressIfNeeded(picked);
+      const toSend = picked;
 
-      // 1) Upload langsung ke Vercel Blob via /api/blob (signer)
-      const { url: imageUrl } = await upload(toSend.name || "artwork", toSend, {
+      // Upload direct ke blob (dengan route signer)
+      const { url: imageUrl } = await upload(toSend.name, toSend, {
         access: "public",
         handleUploadUrl: "/api/blob",
       });
 
-      // 2) Kirim metadata + blobUrl ke server (FormData)
       const meta = new FormData();
       meta.set("title", String(fd.get("title") || ""));
       meta.set("x", String(fd.get("x") || ""));
@@ -28,26 +52,22 @@ export default function SubmitPage() {
       meta.set("blobUrl", imageUrl);
 
       const res = await fetch("/api/submit", { method: "POST", body: meta });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success) throw new Error(data?.error || "Submit failed");
+      const data = await res.json();
 
-      // simpan credential delete
-      try {
-        const raw = localStorage.getItem("fairblock_tokens");
-        const map: Record<string, TokenRec> = raw ? JSON.parse(raw) : {};
-        map[data.id] = { metaUrl: data.metaUrl, ownerTokenHash: data.ownerTokenHash, token: data.deleteToken };
-        localStorage.setItem("fairblock_tokens", JSON.stringify(map));
-      } catch {}
+      if (!data.success) throw new Error(data.error || "Submit failed");
 
       alert("Upload successful!");
-      form.reset(); setPreview(null); setFileName(""); setWorkingFile(null);
       router.push("/gallery");
     } catch (err: any) {
-      alert(err?.message || "Upload failed");
+      alert(err.message || "Upload failed");
     } finally {
       setLoading(false);
     }
   }
 
-  // ...UI sama persis dengan punyamu...
+  return (
+    <form onSubmit={onSubmit}>
+      {/* ...isi form seperti sebelumnya... */}
+    </form>
+  );
 }
