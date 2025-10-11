@@ -1,3 +1,4 @@
+// app/api/history/[scope]/[period]/route.ts
 import { NextResponse, NextRequest } from "next/server";
 import kv from "@/lib/kv";
 import { ymd, isoWeek, prevYmd, prevIsoWeek } from "@/lib/period";
@@ -55,7 +56,7 @@ function keys(scope: "daily" | "weekly", period: "current" | "previous") {
   }
 }
 
-// helper normalize handle pemilik (x/discord)
+// normalize handle pemilik (x/discord)
 function ownerFromMeta(m: any): string {
   const x = (m?.x || "").toString().trim().replace(/^@/, "");
   if (x) return `@${x.toLowerCase()}`;
@@ -63,7 +64,7 @@ function ownerFromMeta(m: any): string {
   return d ? `@${d.toLowerCase()}` : "";
 }
 
-// cek apakah meta.createdAt termasuk periode harian / mingguan (UTC+7 dari lib/period dipakai saat bikin label kunci)
+// cek createdAt masuk periode harian/mingguan (pakai offset UTC+7 dari env)
 function ymdLocal(dateStr: string) {
   const tzMin = Number(process.env.RESET_TZ_MINUTES ?? 420);
   const t = new Date(dateStr).getTime();
@@ -91,16 +92,16 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { scope: string; period: string } }
+  ctx: { params: Promise<{ scope: string; period: string }> } // <-- sesuai project kamu
 ) {
-  const scope = params.scope as "daily" | "weekly";
-  const period = params.period as "current" | "previous";
+  const { scope, period } = await ctx.params; // <-- await params
+
   if (!["daily", "weekly"].includes(scope) || !["current", "previous"].includes(period)) {
     return NextResponse.json({ error: "bad params" }, { status: 400 });
   }
 
   // Top Art dari ZSET (sesuai yang sudah ada)
-  const k = keys(scope, period);
+  const k = keys(scope as "daily" | "weekly", period as "current" | "previous");
   const artArr = await (kv as any).zrevrange(k.art, 0, 49, { withscores: true });
   const top_art = pairs(artArr);
 
