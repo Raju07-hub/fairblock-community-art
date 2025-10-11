@@ -1,318 +1,273 @@
-// app/gallery/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import ArtworkCard from "@/components/ArtworkCard";
 
 type Item = {
   id: string;
   title: string;
+  url: string;
   x?: string;
   discord?: string;
-  url: string;
   createdAt: string;
-  metaUrl?: string;
-  likes?: number;
-  liked?: boolean;
+  metaUrl: string;
+  postUrl?: string; // NEW
 };
 
-type TokenRec = {
-  metaUrl?: string;
-  ownerTokenHash?: string;
-  token?: string;
-};
-
-const ADMIN_UI = process.env.NEXT_PUBLIC_ADMIN_UI === "true";
-
-function xHandle(x?: string) {
-  return (x || "").replace(/^@/, "");
+function handleFromItem(it: Item): string {
+  const x = (it.x || "").replace(/^@/, "");
+  if (x) return `@${x}`;
+  const d = (it.discord || "").replace(/^@/, "");
+  return d ? `@${d}` : "";
 }
 
-function getAdminKeyFromSession(): string | null {
-  try {
-    let k = sessionStorage.getItem("fb_admin_key");
-    if (!k) {
-      k = prompt("Enter ADMIN_KEY:") || "";
-      if (k) sessionStorage.setItem("fb_admin_key", k);
-    }
-    return k || null;
-  } catch {
-    return null;
-  }
+async function sha256Hex(input: string): Promise<string> {
+  const enc = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  const bytes = Array.from(new Uint8Array(buf));
+  return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export default function GalleryPage() {
   const [items, setItems] = useState<Item[]>([]);
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<"new" | "old">("new");
-  const [onlyMine, setOnlyMine] = useState(false);
-  const [myTokens, setMyTokens] = useState<Record<string, TokenRec>>({});
-  const [deleting, setDeleting] = useState<string | null>(null);
-  const [adminMode, setAdminMode] = useState<boolean>(false);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Item | null>(null);
+  const [patch, setPatch] = useState<{ title: string; x: string; discord: string; postUrl: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
-  // NEW: baca ?q dan ?select dari URL (tanpa hook Next)
-  const [selectedId, setSelectedId] = useState<string>("");
-
-  useEffect(() => {
+  async function load() {
+    setLoading(true);
     try {
-      const sp = new URLSearchParams(window.location.search);
-      const q0 = (sp.get("q") || "").trim();
-      const sel = sp.get("select") || "";
-      if (q0) setQuery(q0);
-      if (sel) setSelectedId(sel);
-    } catch {}
-  }, []);
-
-  // initial load + tarik likes & liked status dari server
-  useEffect(() => {
-    (async () => {
-      const res = await fetch("/api/gallery", { cache: "no-store" });
-      const json = await res.json();
-      if (json?.success) {
-        const base: Item[] = json.items || [];
-        setItems(base);
-
-        try {
-          const ids = base.map((i) => i.id).join(",");
-          if (ids) {
-            const r = await fetch(`/api/likes?ids=${encodeURIComponent(ids)}`, {
-              cache: "no-store",
-            });
-            const j = await r.json();
-            if (j?.success && j.data) {
-              setItems((prev) =>
-                prev.map((it) => {
-                  const d = j.data[it.id];
-                  return d
-                    ? { ...it, likes: Number(d.count || 0), liked: !!d.liked }
-                    : it;
-                })
-              );
-            }
-          }
-        } catch {}
-      }
-    })();
-
-    try {
-      const raw = localStorage.getItem("fairblock_tokens");
-      setMyTokens(raw ? JSON.parse(raw) : {});
-    } catch {}
-
-    if (ADMIN_UI) {
-      try {
-        setAdminMode(localStorage.getItem("fb_admin_mode") === "1");
-      } catch {}
-    }
-  }, []);
-
-  const filtered = useMemo(() => {
-    let list = [...items];
-    if (onlyMine) list = list.filter((it) => !!myTokens[it.id]);
-    if (query.trim()) {
-      const q = query.toLowerCase();
-      list = list.filter((it) => {
-        const s = `${it.title || ""} ${it.x || ""} ${it.discord || ""}`.toLowerCase();
-        return s.includes(q) || it.id.toLowerCase().includes(q);
-      });
-    }
-    list.sort((a, b) =>
-      sort === "new"
-        ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-    return list;
-  }, [items, query, sort, onlyMine, myTokens]);
-
-  // NEW: auto-scroll + highlight kalau ada ?select
-  useEffect(() => {
-    if (!selectedId) return;
-    const el = document.getElementById(`art-${selectedId}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("ring-2", "ring-pink-500");
-      const t = setTimeout(() => el.classList.remove("ring-2", "ring-pink-500"), 1600);
-      return () => clearTimeout(t);
-    }
-  }, [selectedId, filtered.length]);
-
-  // delete
-  async function onDelete(id: string, metaUrl?: string, isAdmin = false) {
-    const confirmText = isAdmin ? "Delete this artwork as ADMIN?" : "Delete this artwork?";
-    if (!confirm(confirmText)) return;
-    setDeleting(id);
-
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      let body: any = {};
-
-      if (isAdmin) {
-        const adminKey = getAdminKeyFromSession();
-        if (!adminKey) throw new Error("ADMIN_KEY is missing.");
-        if (!metaUrl) throw new Error("Missing token or metaUrl");
-        headers["x-admin-key"] = adminKey;
-        body = { metaUrl };
-      } else {
-        const rec = myTokens[id];
-        if (!rec?.metaUrl) throw new Error("Missing token or metaUrl");
-        body = { token: rec.token, metaUrl: rec.metaUrl };
-      }
-
-      const res = await fetch(`/api/art/${id}`, {
-        method: "DELETE",
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success) throw new Error(data?.error || "Delete failed");
-
-      alert(isAdmin ? "Admin delete success." : "Deleted successfully.");
-      setItems((prev) => prev.filter((x) => x.id !== id));
-
-      if (!isAdmin) {
-        try {
-          const copy = { ...myTokens };
-          delete copy[id];
-          localStorage.setItem("fairblock_tokens", JSON.stringify(copy));
-          setMyTokens(copy);
-        } catch {}
-      }
-    } catch (err: any) {
-      alert(err?.message || "Delete failed");
+      const r = await fetch("/api/gallery", { cache: "no-store" });
+      const j = await r.json();
+      setItems(j?.items || []);
     } finally {
-      setDeleting(null);
+      setLoading(false);
     }
   }
 
-  // like handler: sync dari server (count & liked)
-  async function likeOne(id: string): Promise<void> {
-    const it = items.find((x) => x.id === id);
-    if (!it) throw new Error("Item not found");
-    const author = xHandle(it.x) || it.discord || "";
+  useEffect(() => {
+    load();
+  }, []);
 
-    const r = await fetch("/api/like", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, author }),
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+
+  function isOwner(it: Item): boolean {
+    try {
+      // token saved under fb:token:<id> at submit time
+      const tok = localStorage.getItem(`fb:token:${it.id}`);
+      return !!tok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function onDelete(it: Item) {
+    if (!confirm("Delete this artwork? This cannot be undone.")) return;
+    try {
+      const token = localStorage.getItem(`fb:token:${it.id}`) || "";
+      const res = await fetch(`/api/art/${encodeURIComponent(it.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, metaUrl: it.metaUrl }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error || "Delete failed");
+      setItems((prev) => prev.filter((x) => x.id !== it.id));
+    } catch (e: any) {
+      alert(e?.message || "Delete failed");
+    }
+  }
+
+  function openEdit(it: Item) {
+    setEditing(it);
+    setPatch({
+      title: it.title || "",
+      x: it.x || "",
+      discord: it.discord || "",
+      postUrl: it.postUrl || "",
     });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j?.success) throw new Error(j?.error || "Like failed");
+    setMessage(null);
+  }
 
-    setItems((prev) =>
-      prev.map((x) =>
-        x.id === id
-          ? { ...x, liked: Boolean(j.liked), likes: Number(j.count ?? (x.likes || 0)) }
-          : x
-      )
-    );
+  async function submitEdit() {
+    if (!editing || !patch) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      // derive ownerTokenHash from deleteToken in localStorage
+      const deleteToken = localStorage.getItem(`fb:token:${editing.id}`) || "";
+      if (!deleteToken) throw new Error("Missing owner token in this browser.");
+      const ownerTokenHash = await sha256Hex(deleteToken);
+
+      const r = await fetch("/api/art/update", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          metaUrl: editing.metaUrl,
+          ownerTokenHash,
+          patch: {
+            title: patch.title.trim(),
+            x: patch.x.trim(),
+            discord: patch.discord.trim(),
+            postUrl: patch.postUrl.trim(),
+          },
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "Update failed");
+
+      // Update local list
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === editing.id
+            ? {
+                ...it,
+                title: patch.title.trim(),
+                x: patch.x.trim() || undefined,
+                discord: patch.discord.trim() || undefined,
+                postUrl: patch.postUrl.trim() || undefined,
+              }
+            : it
+        )
+      );
+      setEditing(null);
+    } catch (e: any) {
+      setMessage(e?.message || "Update failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <div className="max-w-7xl mx-auto px-5 py-10">
+      <div className="flex items-center justify-between mb-6 gap-3">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
-          <Link href="/submit" className="btn">＋ Submit Art</Link>
-          <Link href="/leaderboard" className="btn">🏆 Leaderboard</Link>
+          <Link href="/submit" className="btn">＋ Submit</Link>
         </div>
-
-        <div className="flex flex-wrap gap-3 items-center">
-          <input
-            type="search"
-            placeholder="Search title / @x / discord…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="px-4 py-2 rounded-full"
-          />
-
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as "new" | "old")}
-            className="btn"
-          >
-            <option value="new">Newest</option>
-            <option value="old">Oldest</option>
-          </select>
-
-          <label className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={onlyMine}
-              onChange={(e) => setOnlyMine(e.target.checked)}
-              className="accent-white"
-            />
-            <span className="text-sm">Only My Uploads</span>
-          </label>
-
-          {ADMIN_UI && (
-            <label className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={adminMode}
-                onChange={(e) => {
-                  const v = e.target.checked;
-                  setAdminMode(v);
-                  try {
-                    localStorage.setItem("fb_admin_mode", v ? "1" : "0");
-                  } catch {}
-                }}
-                className="accent-white"
-              />
-              <span className="text-sm">Admin Mode</span>
-            </label>
-          )}
-
-          {query && (
-            <button onClick={() => setQuery("")} className="btn-ghost px-4 py-2">
-              ✕ Clear
-            </button>
-          )}
-        </div>
+        <button className="btn" onClick={load} disabled={loading}>
+          ↻ {loading ? "Refreshing…" : "Refresh"}
+        </button>
       </div>
 
-      <h1 className="text-3xl font-bold text-gradient mb-2">Gallery</h1>
-      <p className="text-white/60 mb-6">
-        {filtered.length} result{filtered.length !== 1 ? "s" : ""}
-        {ADMIN_UI && adminMode && <span className="ml-2">• <b>Admin Mode ON</b></span>}
-        {onlyMine && <span className="ml-2">• showing <b>my uploads</b></span>}
-        {query && <span className="ml-2">• for <span className="text-gradient">{query}</span></span>}
-      </p>
-
-      {filtered.length === 0 ? (
-        <p className="text-white/70">No results found.</p>
+      {loading ? (
+        <p className="opacity-70">Loading…</p>
+      ) : items.length === 0 ? (
+        <p className="opacity-70">No items yet.</p>
       ) : (
-        <div className="grid gap-5 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
-          {filtered.map((it) => {
-            const mine = !!myTokens[it.id];
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+          {items.map((it) => {
+            const owner = handleFromItem(it);
+            const canEdit = isOwner(it);
+            const xUrl = owner ? `https://x.com/${owner.replace(/^@/, "")}` : "";
+
             return (
-              <div key={it.id} id={`art-${it.id}`} className="flex flex-col">
-                <ArtworkCard item={it} onLike={likeOne} />
-                {mine && (
-                  <button
-                    onClick={() => onDelete(it.id, it.metaUrl, false)}
-                    className="btn-ghost mt-3"
-                    disabled={deleting === it.id}
-                    title="Delete (owner)"
-                  >
-                    {deleting === it.id ? "Deleting..." : "🗑 Delete"}
-                  </button>
+              <div key={it.id} className="bg-white/5 rounded-2xl p-4 flex flex-col shadow">
+                <div className="rounded-xl overflow-hidden bg-white/10 aspect-[4/3] mb-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={it.url}
+                    alt={it.title}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </div>
+                <div className="font-semibold">{it.title}</div>
+                {owner && (
+                  <div className="text-sm opacity-75 mt-1">
+                    by{" "}
+                    <a className="underline" href={xUrl} target="_blank" rel="noreferrer">
+                      {owner}
+                    </a>
+                  </div>
                 )}
-                {ADMIN_UI && adminMode && (
-                  <button
-                    onClick={() => onDelete(it.id, it.metaUrl, true)}
-                    className="btn-ghost mt-2 text-xs opacity-70 hover:opacity-100"
-                    disabled={deleting === it.id}
-                    title="Admin delete"
-                  >
-                    {deleting === it.id ? "Deleting..." : "🗑 Delete (Admin)"}
-                  </button>
-                )}
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link href={`/gallery?select=${encodeURIComponent(it.id)}`} className="btn">
+                    See on Gallery
+                  </Link>
+                  {it.postUrl && (
+                    <a className="btn" href={it.postUrl} target="_blank" rel="noreferrer">
+                      Open Art Post
+                    </a>
+                  )}
+                  {canEdit && (
+                    <>
+                      <button className="btn" onClick={() => openEdit(it)}>Edit</button>
+                      <button className="btn bg-red-500 hover:bg-red-400" onClick={() => onDelete(it)}>
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ===== Edit Modal ===== */}
+      {editing && patch && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="w-full max-w-lg bg-[#0b0f14] rounded-2xl p-5 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Edit Artwork</h3>
+              <button className="btn" onClick={() => setEditing(null)}>✕</button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm mb-1 opacity-80">Title</label>
+                <input
+                  className="input w-full"
+                  value={patch.title}
+                  onChange={(e) => setPatch({ ...patch, title: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm mb-1 opacity-80">X (Twitter) Handle</label>
+                  <input
+                    className="input w-full"
+                    value={patch.x}
+                    onChange={(e) => setPatch({ ...patch, x: e.target.value })}
+                    placeholder="@yourhandle"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1 opacity-80">Discord</label>
+                  <input
+                    className="input w-full"
+                    value={patch.discord}
+                    onChange={(e) => setPatch({ ...patch, discord: e.target.value })}
+                    placeholder="@you#1234"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm mb-1 opacity-80">Your Art Post (X/Twitter)</label>
+                <input
+                  className="input w-full"
+                  value={patch.postUrl}
+                  onChange={(e) => setPatch({ ...patch, postUrl: e.target.value })}
+                  placeholder="https://x.com/yourhandle/status/1234567890"
+                />
+              </div>
+              {message && <p className="text-sm text-red-400">{message}</p>}
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button className="btn" onClick={submitEdit} disabled={busy}>
+                {busy ? "Saving…" : "Save"}
+              </button>
+              <button className="btn" onClick={() => setEditing(null)} disabled={busy}>
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
