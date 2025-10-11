@@ -63,12 +63,13 @@ export default function EditArtworkPage() {
     })();
   }, [id, router]);
 
+  // SAVE dengan fallback 405 -> POST override
   async function onSave() {
     if (!item) return;
 
     const token = getOwnerTokenFor(item.id);
     if (!token) {
-      alert("Delete/Edit token not found. Gunakan browser yg sama saat submit.");
+      alert("Delete/Edit token not found. Gunakan browser yang sama saat submit.");
       return;
     }
     if (!item.metaUrl) {
@@ -85,20 +86,34 @@ export default function EditArtworkPage() {
         postUrl: postUrl.trim(),
       };
 
-      const resp = await fetch(`/api/art/${item.id}`, {
+      const url = `/api/art/${item.id}`;
+      const body = JSON.stringify({ token, metaUrl: item.metaUrl, patch });
+
+      // 1) PATCH dulu
+      let resp = await fetch(url, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, metaUrl: item.metaUrl, patch }),
+        body,
       });
 
-      // --- PARSE RESPON AMAN (204 / non-JSON) ---
+      // 2) jika 405 -> POST override PATCH
+      if (resp.status === 405) {
+        resp = await fetch(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-HTTP-Method-Override": "PATCH",
+          },
+          body: JSON.stringify({ token, metaUrl: item.metaUrl, patch, _method: "PATCH" }),
+        });
+      }
+
+      // 3) parse respons aman (204 / json / text)
       let data: any = null;
       const ct = resp.headers.get("content-type") || "";
-      if (resp.status === 204) {
-        data = { success: true };
-      } else if (ct.includes("application/json")) {
-        data = await resp.json();
-      } else {
+      if (resp.status === 204) data = { success: true };
+      else if (ct.includes("application/json")) data = await resp.json();
+      else {
         const text = await resp.text().catch(() => "");
         data = resp.ok ? { success: true } : { success: false, error: text || resp.statusText };
       }
@@ -107,7 +122,7 @@ export default function EditArtworkPage() {
         throw new Error(data?.error || `${resp.status} ${resp.statusText}`);
       }
 
-      alert("Saved.");
+      alert("Saved successfully!");
       router.push("/gallery");
     } catch (e: any) {
       alert(e?.message || "Failed to save");
