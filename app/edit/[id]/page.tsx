@@ -38,15 +38,15 @@ export default function EditArtworkPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load artwork (termasuk metaUrl) dari /api/gallery lalu filter by id
+  // Load artwork
   useEffect(() => {
     if (!id) return;
     (async () => {
       setLoading(true);
       try {
-        const j = await fetch("/api/gallery", { cache: "no-store" }).then((r) => r.json());
+        const j = await fetch("/api/gallery", { cache: "no-store" }).then(r => r.json());
         const list: Artwork[] = j?.items || [];
-        const found = list.find((a) => a.id === id) || null;
+        const found = list.find(a => a.id === id) || null;
         if (!found) {
           alert("Artwork not found.");
           router.push("/gallery");
@@ -63,7 +63,7 @@ export default function EditArtworkPage() {
     })();
   }, [id, router]);
 
-  // SAVE dengan fallback 405 -> POST override
+  // Save edit
   async function onSave() {
     if (!item) return;
 
@@ -89,33 +89,32 @@ export default function EditArtworkPage() {
       const url = `/api/art/${item.id}`;
       const body = JSON.stringify({ token, metaUrl: item.metaUrl, patch });
 
-      // 1) PATCH dulu
+      // 1️⃣ Coba PATCH dulu
       let resp = await fetch(url, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body,
       });
 
-      // 2) jika 405 -> POST override PATCH
+      // 2️⃣ Kalau 405, coba PUT
       if (resp.status === 405) {
         resp = await fetch(url, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "X-HTTP-Method-Override": "PATCH",
-          },
-          body: JSON.stringify({ token, metaUrl: item.metaUrl, patch, _method: "PATCH" }),
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body,
         });
       }
 
-      // 3) parse respons aman (204 / json / text)
+      // 3️⃣ Parsing aman
       let data: any = null;
       const ct = resp.headers.get("content-type") || "";
       if (resp.status === 204) data = { success: true };
       else if (ct.includes("application/json")) data = await resp.json();
       else {
         const text = await resp.text().catch(() => "");
-        data = resp.ok ? { success: true } : { success: false, error: text || resp.statusText };
+        data = resp.ok
+          ? { success: true }
+          : { success: false, error: text || resp.statusText };
       }
 
       if (!resp.ok || data?.success === false) {
@@ -151,7 +150,6 @@ export default function EditArtworkPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-5 sm:px-6 py-10">
-      {/* Back buttons */}
       <div className="mb-5 flex gap-3">
         <button className="btn" onClick={() => router.back()}>
           ⬅ Back
