@@ -1,19 +1,14 @@
-// app/leaderboard/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-type TopItem = { id: string; score: number };
+type TopItem = { id: string; score?: number; likes?: number; title?: string; owner?: string };
 type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; createdAt: string };
-type LbResp = { success: boolean; topArts: TopItem[] };
+type CreatorRow = { user: string; uploads: number };
 
-function handleFromItem(it: GalleryItem): string {
-  const x = (it.x || "").replace(/^@/, "");
-  if (x) return `@${x}`;
-  const d = (it.discord || "").replace(/^@/, "");
-  return d ? `@${d}` : "";
-}
+type Scope = "daily" | "weekly" | "alltime";
+type Mode = "current" | "previous";
 
 const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
 function nextDailyResetUTC(now = new Date()): Date {
@@ -36,13 +31,22 @@ function formatDuration(ms: number): string {
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
+function handleFromItem(it: GalleryItem): string {
+  const x = (it.x || "").replace(/^@/, "");
+  if (x) return `@${x}`;
+  const d = (it.discord || "").replace(/^@/, "");
+  return d ? `@${d}` : "";
+}
 
 export default function LeaderboardPage() {
-  const [range, setRange] = useState<"daily" | "weekly">("daily");
+  const [scope, setScope] = useState<Scope>("daily");
+  const [mode, setMode] = useState<Mode>("current");
   const [loading, setLoading] = useState(true);
-  const [lb, setLb] = useState<LbResp | null>(null);
+  const [topArts, setTopArts] = useState<TopItem[]>([]);
+  const [topCreators, setTopCreators] = useState<CreatorRow[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [countdown, setCountdown] = useState("--:--:--");
+  const [keyDate, setKeyDate] = useState<string | null>(null);
 
   const btn = "btn px-4 py-1 rounded-full text-sm";
   const btnSm = "btn px-3 py-1 rounded-full text-xs";
@@ -50,49 +54,63 @@ export default function LeaderboardPage() {
   const badgeSm = "px-2.5 py-0.5 rounded-full text-xs font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
   const heading = "text-2xl font-bold mb-3 text-[#3aaefc]";
 
-  async function load(currentRange: "daily" | "weekly") {
+  async function load() {
     setLoading(true);
     try {
-      const r = await fetch(`/api/leaderboard?range=${currentRange}`, { cache: "no-store" });
-      const j = await r.json().catch(() => ({}));
-      const normalized: LbResp = { success: !!j?.success, topArts: j?.topArts ?? j?.arts ?? [] };
-      const g = await fetch(`/api/gallery`, { cache: "no-store" }).then(res => res.json()).catch(() => ({}));
-      setLb(normalized);
+      // gallery meta (join judul/owner untuk kartu)
+      const g = await fetch(`/api/gallery`, { cache: "no-store" })
+        .then(res => res.json()).catch(() => ({}));
       setGallery(g?.items ?? []);
+
+      if (scope === "alltime") {
+        const r = await fetch(`/api/leaderboard/alltime`, { cache: "no-store" });
+        const j = await r.json();
+        setTopArts((j?.top_art || []).map((x: any) => ({ id: x.id, likes: x.likes, title: x.title, owner: x.owner })));
+        setTopCreators((j?.top_creators || []).map((c: any) => ({ user: c.user, uploads: c.uploads })));
+        setKeyDate(null);
+      } else {
+        const r = await fetch(`/api/history/${scope}/${mode}`, { cache: "no-store" });
+        const j = await r.json();
+        setTopArts(j?.top_art || []);
+        // API history kita sudah kirim { user, uploads }
+        setTopCreators((j?.top_creators || []).map((c: any) => ({ user: c.user, uploads: c.uploads })));
+        setKeyDate(j?.keyDate || null);
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(range); }, [range]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope, mode]);
 
   useEffect(() => {
     function tick() {
       const now = new Date();
-      const target = range === "weekly" ? nextWeeklyResetUTC_Saturday(now) : nextDailyResetUTC(now);
+      const target = scope === "weekly" ? nextWeeklyResetUTC_Saturday(now) : nextDailyResetUTC(now);
       setCountdown(formatDuration(target.getTime() - now.getTime()));
     }
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [range]);
+    if (scope !== "alltime") {
+      tick();
+      const id = setInterval(tick, 1000);
+      return () => clearInterval(id);
+    } else {
+      setCountdown("--:--:--");
+    }
+  }, [scope]);
 
   const byId = useMemo(() => new Map(gallery.map(it => [it.id, it])), [gallery]);
 
-  const uploadsByCreator = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const it of gallery) {
-      const h = handleFromItem(it);
-      if (!h) continue;
-      m.set(h, (m.get(h) || 0) + 1);
-    }
-    return m;
-  }, [gallery]);
-
   const resetLabel =
-    range === "weekly"
+    scope === "weekly"
       ? "Weekly reset: every Saturday at 00:00 UTC+7"
-      : "Daily reset: every day at 00:00 UTC+7";
+      : scope === "daily"
+      ? "Daily reset: every day at 00:00 UTC+7"
+      : "All-Time";
+
+  const headerTitle =
+    scope === "alltime"
+      ? "🏆 Top Art (All Time)"
+      : `🏆 Top Art (${scope} — ${mode})${keyDate ? ` · ${keyDate}` : ""}`;
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
@@ -105,13 +123,20 @@ export default function LeaderboardPage() {
         <div className="flex items-center gap-2">
           <div className="hidden sm:flex flex-col items-end mr-2">
             <span className="text-xs opacity-70">{resetLabel}</span>
-            <span className="text-sm font-semibold text-[#3aaefc]">Resets in {countdown}</span>
+            {scope !== "alltime" && <span className="text-sm font-semibold text-[#3aaefc]">Resets in {countdown}</span>}
           </div>
-          <select value={range} onChange={e => setRange(e.target.value as "daily" | "weekly")} className="btn">
+          <select value={scope} onChange={e => setScope(e.target.value as Scope)} className="btn">
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
+            <option value="alltime">All Time</option>
           </select>
-          <button onClick={() => load(range)} className="btn" disabled={loading}>
+          {scope !== "alltime" && (
+            <select value={mode} onChange={e => setMode(e.target.value as Mode)} className="btn">
+              <option value="current">Current</option>
+              <option value="previous">Previous</option>
+            </select>
+          )}
+          <button onClick={load} className="btn" disabled={loading}>
             ↻ {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
@@ -119,23 +144,24 @@ export default function LeaderboardPage() {
 
       {loading ? (
         <p className="text-white/70">Loading…</p>
-      ) : !lb?.success ? (
-        <p className="text-white/70">Failed to load.</p>
       ) : (
         <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.2fr)_minmax(0,0.9fr)] gap-6">
-          {/* --- Top Art (slightly smaller image, no X button) --- */}
+          {/* --- Top Art --- */}
           <section>
-            <h2 className={heading}>🏆 Top Art (Top 10)</h2>
+            <h2 className={heading}>{headerTitle}</h2>
             <div className="space-y-3">
-              {lb.topArts
-                .filter(t => byId.has(t.id))
+              {topArts
+                .filter(t => scope === "alltime" ? true : byId.has(t.id))
                 .slice(0, 10)
                 .map((t, idx) => {
-                  const g = byId.get(t.id)!;
-                  const handle = handleFromItem(g);
-                  const handleNoAt = handle.replace(/^@/, "");
+                  const g = byId.get(t.id) as GalleryItem | undefined;
+                  const name = t.title ?? g?.title ?? "Untitled";
+                  const owner = (t.owner ?? (g ? handleFromItem(g) : "") ?? "").toString();
+                  const handleNoAt = owner.replace(/^@/, "");
                   const xUrl = handleNoAt ? `https://x.com/${handleNoAt}` : "";
                   const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
+
+                  const score = typeof t.likes === "number" ? t.likes : (t.score ?? 0);
 
                   return (
                     <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
@@ -147,7 +173,7 @@ export default function LeaderboardPage() {
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={g.url}
-                              alt={g?.title || "Artwork"}
+                              alt={name}
                               className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
                               loading="lazy"
                               decoding="async"
@@ -161,12 +187,12 @@ export default function LeaderboardPage() {
 
                         <div className="min-w-0">
                           <div className="font-medium truncate text-base">
-                            {g?.title || "Untitled"}{" "}
-                            {handle && (
+                            {name}{" "}
+                            {owner && (
                               <>
                                 <span className="opacity-70">by</span>{" "}
                                 <a href={xUrl} target="_blank" rel="noopener noreferrer" className="underline text-[#4af2ff]">
-                                  {handle}
+                                  {owner}
                                 </a>
                               </>
                             )}
@@ -176,39 +202,41 @@ export default function LeaderboardPage() {
                           </div>
                         </div>
                       </div>
-                      <span className={badge}>{t.score}</span>
+                      <span className={badge}>{score}</span>
                     </div>
                   );
                 })}
             </div>
           </section>
 
-          {/* --- Top Creators (narrow) --- */}
+          {/* --- Top Creators (uploads-based) --- */}
           <section>
             <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
             <div className="space-y-3">
-              {Array.from(uploadsByCreator.entries())
-                .map(([creator, score]) => ({ creator, score }))
-                .sort((a, b) => b.score - a.score)
+              {topCreators
+                .slice(0, 50) // safety
+                .sort((a, b) => (b.uploads - a.uploads))
                 .slice(0, 10)
                 .map((c, idx) => {
-                  const handle = c.creator.startsWith("@") ? c.creator : `@${c.creator}`;
+                  const handle = c.user?.startsWith("@") ? c.user : `@${c.user}`;
                   const galleryLink = `/gallery?q=${encodeURIComponent(handle)}`;
-                  const xUrl = `https://x.com/${handle.replace(/^@/, "")}`;
+                  const xUrl = `https://x.com/${String(handle || "").replace(/^@/, "")}`;
                   return (
                     <div key={handle} className="flex items-center justify-between bg-white/5 rounded-xl p-2.5">
                       <div className="flex items-center gap-3 min-w-0">
                         <span className="w-6 text-center opacity-70 text-sm">{idx + 1}.</span>
                         <div className="min-w-0">
                           <div className="font-medium truncate text-[15px]">{handle}</div>
-                          <div className="text-xs opacity-60">Uploads: {c.score}</div>
+                          <div className="text-xs opacity-60">
+                            Uploads{scope !== "alltime" ? " (period)" : ""}: {c.uploads}
+                          </div>
                           <div className="mt-2 flex flex-wrap gap-2">
                             <Link href={galleryLink} className={btnSm}>Search on Gallery</Link>
                             <a href={xUrl} target="_blank" rel="noopener noreferrer" className={btnSm}>Open X Profile</a>
                           </div>
                         </div>
                       </div>
-                      <span className={badgeSm}>{c.score}</span>
+                      <span className={badgeSm}>{c.uploads}</span>
                     </div>
                   );
                 })}
