@@ -27,7 +27,7 @@ export default function SubmitPage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   function validPostUrl(s: string) {
-    if (!s) return true;
+    if (!s) return true; // optional
     try {
       const u = new URL(s);
       return u.protocol === "http:" || u.protocol === "https:";
@@ -60,11 +60,17 @@ export default function SubmitPage() {
         throw new Error((j as any)?.error || "Upload failed");
       }
 
-      // 🔐 Save both deleteToken & ownerTokenHash so the user can Edit/Delete later.
+      // 🔐 Save owner credentials so this browser can Edit/Delete later.
       try {
+        // 1) Map style used by Gallery (required for owner-only buttons)
+        const raw = localStorage.getItem("fairblock:tokens");
+        const map = raw ? JSON.parse(raw) : {};
+        map[j.id] = j.deleteToken;
+        localStorage.setItem("fairblock:tokens", JSON.stringify(map));
+
+        // 2) Also keep per-id keys (future compatibility)
         localStorage.setItem(`fb:token:${j.id}`, j.deleteToken);
         localStorage.setItem(`fb:ownerHash:${j.id}`, j.ownerTokenHash);
-        // map metaUrl → id for convenience
         localStorage.setItem(`fb:meta:${j.metaUrl}`, j.id);
       } catch {}
 
@@ -113,7 +119,7 @@ export default function SubmitPage() {
               className="input w-full"
               value={discord}
               onChange={(e) => setDiscord(e.target.value)}
-              placeholder="@you#1234"
+              placeholder="you#1234"
             />
           </div>
         </div>
@@ -122,10 +128,7 @@ export default function SubmitPage() {
         <div>
           <label className="block mb-1 text-sm opacity-80">Your Art Post (X/Twitter)</label>
           <input
-            className={cx(
-              "input w-full",
-              postUrl && !validPostUrl(postUrl) && "ring-2 ring-red-500"
-            )}
+            className={cx("input w-full", postUrl && !validPostUrl(postUrl) && "ring-2 ring-red-500")}
             value={postUrl}
             onChange={(e) => setPostUrl(e.target.value)}
             placeholder="https://x.com/yourhandle/status/1234567890"
