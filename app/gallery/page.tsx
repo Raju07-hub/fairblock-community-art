@@ -1,162 +1,312 @@
+// app/gallery/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-type Artwork = {
+type GalleryItem = {
   id: string;
   title: string;
   url: string;
   x?: string;
   discord?: string;
-  postUrl?: string; // ← NEW
-  metaUrl?: string;
-  createdAt?: string;
+  createdAt: string;
+  metaUrl: string;
+  postUrl?: string; // ← NEW: open art post
 };
 
-export default function GalleryPage() {
-  const [items, setItems] = useState<Artwork[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  async function loadGallery() {
-    setLoading(true);
-    const res = await fetch("/api/gallery", { cache: "no-store" });
-    const j = await res.json();
-    setItems(j?.items ?? []);
-    setLoading(false);
+type LikeMap = Record<
+  string,
+  {
+    count: number;
+    liked: boolean;
   }
+>;
 
-  async function handleDelete(metaUrl: string, id: string) {
-    const token = localStorage.getItem(`deleteToken:${id}`);
-    if (!token) {
-      alert("Missing owner token.");
-      return;
-    }
-    if (!confirm("Are you sure you want to delete this artwork?")) return;
-    const res = await fetch(`/api/art/${id}`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, metaUrl }),
-    });
-    const j = await res.json();
-    if (j?.success) {
-      alert("Deleted successfully.");
-      loadGallery();
-    } else {
-      alert("Delete failed: " + j?.error);
+const btn = "btn px-4 py-1 rounded-full text-sm";
+const pill = "btn px-3 py-1 rounded-full text-xs";
+const counter =
+  "flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 text-white/90";
+
+function normHandle(x?: string) {
+  if (!x) return "";
+  return x.startsWith("@") ? x : `@${x}`;
+}
+
+function getOwnerTokenFor(id: string): string | null {
+  try {
+    const raw = localStorage.getItem("fairblock:tokens");
+    if (!raw) return null;
+    const map = JSON.parse(raw || "{}");
+    return map?.[id] || null;
+  } catch {
+    return null;
+  }
+}
+
+function setOwnerTokenFor(id: string, token: string) {
+  try {
+    const raw = localStorage.getItem("fairblock:tokens");
+    const map = raw ? JSON.parse(raw) : {};
+    map[id] = token;
+    localStorage.setItem("fairblock:tokens", JSON.stringify(map));
+  } catch {}
+}
+
+export default function GalleryPage() {
+  const [items, setItems] = useState<GalleryItem[]>([]);
+  const [likes, setLikes] = useState<LikeMap>({});
+  const [query, setQuery] = useState("");
+  const [onlyMine, setOnlyMine] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // load gallery
+  async function load() {
+    setLoading(true);
+    try {
+      const j = await fetch("/api/gallery", { cache: "no-store" }).then((r) =>
+        r.json()
+      );
+      const list: GalleryItem[] = j?.items || [];
+      setItems(list);
+
+      if (list.length) {
+        const ids = list.map((i) => i.id).join(",");
+        const liked = await fetch(`/api/likes?ids=${ids}`, {
+          cache: "no-store",
+        }).then((r) => r.json());
+        setLikes(liked?.data || {});
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadGallery();
+    load();
   }, []);
 
+  // like/unlike
+  async function toggleLike(it: GalleryItem) {
+    const body = { id: it.id, author: normHandle(it.x || it.discord || "") };
+    const j = await fetch("/api/like", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+    }).then((r) => r.json());
+    if (j?.success) {
+      setLikes((prev) => ({
+        ...prev,
+        [it.id]: { count: j.count ?? 0, liked: !!j.liked },
+      }));
+    }
+  }
+
+  // delete
+  async function onDelete(it: GalleryItem) {
+    const token = getOwnerTokenFor(it.id);
+    if (!token) return alert("Delete token not found for this artwork.");
+    if (!confirm("Delete this artwork?")) return;
+
+    const j = await fetch(`/api/art/${it.id}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token, metaUrl: it.metaUrl }),
+    }).then((r) => r.json());
+    if (j?.success) {
+      setItems((prev) => prev.filter((x) => x.id !== it.id));
+    } else {
+      alert(j?.error || "Delete failed");
+    }
+  }
+
+  // helper: apakah viewer adalah owner (punya token lokal)
+  function isOwner(it: GalleryItem) {
+    return !!getOwnerTokenFor(it.id);
+  }
+
+  // filter
+  const filtered = useMemo(() => {
+    let list = items;
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter((it) => {
+        const h = [it.title, it.x, it.discord].join(" ").toLowerCase();
+        return h.includes(q);
+      });
+    }
+    if (onlyMine) {
+      list = list.filter((it) => isOwner(it));
+    }
+    return list;
+  }, [items, query, onlyMine]);
+
   return (
-    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex gap-3">
-          <Link href="/" className="btn">⬅ Back Home</Link>
-          <Link href="/leaderboard" className="btn">🏆 Leaderboard</Link>
-          <Link href="/submit" className="btn">＋ Submit</Link>
-        </div>
-        <button onClick={loadGallery} className="btn" disabled={loading}>
-          ↻ {loading ? "Refreshing…" : "Refresh"}
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      {/* Top bar */}
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        <Link href="/" className="btn">
+          ← Back Home
+        </Link>
+        <Link href="/submit" className="btn">
+          + Submit Art
+        </Link>
+        <Link href="/leaderboard" className="btn">
+          🏆 Leaderboard
+        </Link>
+
+        <div className="flex-1" />
+        <button onClick={load} className="btn">
+          ↻ Refresh
         </button>
       </div>
 
+      {/* Search & filters */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search title / @x / discord…"
+          className="w-full sm:w-96 px-4 py-2 rounded-xl bg-white/10 outline-none"
+        />
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={onlyMine}
+            onChange={(e) => setOnlyMine(e.target.checked)}
+          />
+          Only My Uploads
+        </label>
+      </div>
+
+      <h1 className="text-2xl font-bold mb-4">Gallery</h1>
+
       {loading ? (
-        <p className="opacity-70">Loading gallery…</p>
+        <p className="opacity-70">Loading…</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-          {items.map((item) => {
-            const isOwner =
-              typeof window !== "undefined" &&
-              !!localStorage.getItem(`deleteToken:${item.id}`);
+        <>
+          <p className="opacity-70 mb-3">
+            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+          </p>
 
-            const xProfile = item.x
-              ? `https://x.com/${item.x.replace(/^@/, "")}`
-              : "";
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filtered.map((it) => {
+              const like = likes[it.id] || { count: 0, liked: false };
+              const handle = normHandle(it.x || it.discord || "");
+              const xUrl =
+                it.x && handle
+                  ? `https://x.com/${handle.replace(/^@/, "")}`
+                  : "";
+              const openPost =
+                it.postUrl &&
+                /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl)
+                  ? it.postUrl
+                  : "";
 
-            return (
-              <div
-                key={item.id}
-                className={`bg-white/5 rounded-xl p-4 flex flex-col shadow-md hover:bg-white/10 transition`}
-              >
-                {/* image */}
-                <div className="rounded-xl overflow-hidden mb-3 relative">
+              return (
+                <div
+                  key={it.id}
+                  className="rounded-2xl overflow-hidden bg-white/5 shadow-lg"
+                >
+                  {/* Image */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={item.url}
-                    alt={item.title}
-                    className="w-full h-60 object-cover transition-transform duration-300 hover:scale-105"
+                    src={it.url}
+                    alt={it.title}
+                    className="w-full aspect-[4/3] object-cover"
                     loading="lazy"
+                    decoding="async"
                   />
-                </div>
 
-                {/* info */}
-                <div className="flex flex-col flex-1 justify-between">
-                  <div>
-                    <div className="font-semibold text-lg truncate mb-1">{item.title}</div>
-                    <div className="text-sm opacity-80 space-x-2">
-                      {item.x && (
+                  {/* Body */}
+                  <div className="p-4">
+                    <div className="font-semibold">{it.title || "Untitled"}</div>
+
+                    <div className="mt-1 text-sm text-white/70 flex items-center gap-2">
+                      {it.x && (
                         <a
-                          href={xProfile}
+                          className="underline"
+                          href={xUrl}
                           target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline text-[#4af2ff]"
+                          rel="noreferrer"
                         >
-                          {item.x}
+                          {normHandle(it.x)}
                         </a>
                       )}
-                      {item.discord && (
-                        <span className="opacity-70">· {item.discord}</span>
+                      {it.discord && (
+                        <>
+                          <span>·</span>
+                          <span>{normHandle(it.discord)}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Actions row */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/gallery?select=${encodeURIComponent(it.id)}`}
+                        className={pill}
+                      >
+                        See on Gallery
+                      </Link>
+
+                      {openPost && (
+                        <a
+                          href={openPost}
+                          className={pill}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open Art Post
+                        </a>
+                      )}
+
+                      {it.discord && (
+                        <button
+                          className={pill}
+                          onClick={() =>
+                            navigator.clipboard.writeText(it.discord!)
+                          }
+                        >
+                          Copy Discord
+                        </button>
+                      )}
+
+                      <button
+                        className={counter}
+                        onClick={() => toggleLike(it)}
+                        title={like.liked ? "Unlike" : "Like"}
+                      >
+                        <span>💙</span>
+                        <span>{like.count}</span>
+                      </button>
+
+                      {/* Owner controls */}
+                      {isOwner(it) && (
+                        <>
+                          <Link
+                            href={`/edit/${it.id}`}
+                            className={pill}
+                            title="Edit this artwork"
+                          >
+                            ✏️ Edit
+                          </Link>
+                          <button
+                            className={pill}
+                            onClick={() => onDelete(it)}
+                            title="Delete this artwork"
+                          >
+                            🗑 Delete
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
-
-                  {/* buttons */}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Link
-                      href={`/gallery?select=${encodeURIComponent(item.id)}`}
-                      className="btn px-3 py-1 rounded-full text-sm"
-                    >
-                      Permalink
-                    </Link>
-
-                    {item.postUrl && (
-                      <a
-                        href={item.postUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn px-3 py-1 rounded-full text-sm"
-                      >
-                        Open Art Post
-                      </a>
-                    )}
-
-                    {isOwner && (
-                      <>
-                        <button
-                          onClick={() => handleDelete(item.metaUrl!, item.id)}
-                          className="btn px-3 py-1 rounded-full text-sm bg-red-500/50 hover:bg-red-500/70"
-                        >
-                          Delete
-                        </button>
-                        <Link
-                          href={`/edit/${item.id}`}
-                          className="btn px-3 py-1 rounded-full text-sm bg-yellow-400/30 hover:bg-yellow-400/50"
-                        >
-                          Edit
-                        </Link>
-                      </>
-                    )}
-                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
