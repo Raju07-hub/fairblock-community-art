@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Heart } from "lucide-react";
+import { Heart, X } from "lucide-react";
 
 type GalleryItem = {
   id: string;
@@ -21,6 +21,7 @@ function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
 }
+
 function getOwnerTokenFor(id: string): string | null {
   try {
     const raw = localStorage.getItem("fairblock:tokens");
@@ -62,6 +63,7 @@ export default function GalleryClient() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
+  const [selected, setSelected] = useState<GalleryItem | null>(null);
 
   async function load() {
     setLoading(true);
@@ -79,6 +81,7 @@ export default function GalleryClient() {
       setLoading(false);
     }
   }
+
   useEffect(() => { load(); }, []);
 
   async function toggleLike(it: GalleryItem) {
@@ -97,13 +100,11 @@ export default function GalleryClient() {
     const token = getOwnerTokenFor(it.id);
     if (!token) return alert("Delete token not found. Use the same browser you used to submit.");
     if (!confirm("Delete this artwork?")) return;
-
     const j = await fetch(`/api/art/${it.id}`, {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token, metaUrl: it.metaUrl }),
     }).then(r => r.json());
-
     if (j?.success) setItems(prev => prev.filter(x => x.id !== it.id));
     else alert(j?.error || "Delete failed");
   }
@@ -128,8 +129,8 @@ export default function GalleryClient() {
   }, [items, query, onlyMine, sort]);
 
   return (
-    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
-      {/* actions */}
+    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10 relative">
+      {/* === Action bar === */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
@@ -142,14 +143,13 @@ export default function GalleryClient() {
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search title / @x / discord..."
-            className="px-4 py-2 rounded-full bg-white/10 outline-none w-56"
+            className="px-4 py-2 rounded-full bg-white/10 outline-none w-56 text-white placeholder-white/60"
           />
 
-          {/* Newest / Older */}
           <select
             value={sort}
             onChange={e => setSort(e.target.value as "newest" | "oldest")}
-            className="px-3 py-2 rounded-full bg-white/10 text-white text-sm outline-none"
+            className="btn px-4 py-2 text-sm"
           >
             <option value="newest">Newest</option>
             <option value="oldest">Older</option>
@@ -164,9 +164,7 @@ export default function GalleryClient() {
             Only My Uploads
           </label>
 
-          <button onClick={load} className="btn">
-            ↻ {loading ? "Refreshing…" : "Refresh"}
-          </button>
+          <button onClick={load} className="btn">↻ {loading ? "Refreshing…" : "Refresh"}</button>
         </div>
       </div>
 
@@ -184,23 +182,19 @@ export default function GalleryClient() {
             const discordName = (it.discord || "").replace(/^@/, "");
             const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
             const openPost = it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl) ? it.postUrl : "";
-            const queryKey = xHandle || discordName || it.title;
             const isOwner = !!getOwnerTokenFor(it.id);
 
             return (
-              <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover">
-                {/* ==== GAMBAR: setelan seperti dulu ==== */}
-                <div className="relative">
+              <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
+                <div className="relative cursor-pointer" onClick={() => setSelected(it)}>
                   <img
                     src={it.url}
                     alt={it.title}
-                    className="w-full aspect-[4/3] object-cover"
+                    className="w-full aspect-[4/3] object-cover transition-transform duration-300 hover:scale-105"
                   />
-                  {/* gradient gelap halus di bawah gambar (seperti versi lama) */}
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
-                  {/* ❤️ badge kanan-atas */}
                   <button
-                    onClick={() => toggleLike(it)}
+                    onClick={(e) => { e.stopPropagation(); toggleLike(it); }}
                     aria-pressed={like.liked}
                     title={like.liked ? "Unlike" : "Like"}
                     className={`absolute top-2 right-2 flex items-center gap-1 px-3 py-1 rounded-full transition backdrop-blur-sm ${
@@ -212,7 +206,6 @@ export default function GalleryClient() {
                   </button>
                 </div>
 
-                {/* ==== INFO + BUTTONS (jangan diubah) ==== */}
                 <div className="p-4">
                   <div className="font-semibold truncate">{it.title}</div>
                   <div className="text-sm text-white/70 mt-1">
@@ -230,27 +223,12 @@ export default function GalleryClient() {
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      className="btn px-3 py-1 text-xs"
-                      onClick={() => {
-                        const target = queryKey || "";
-                        setQuery(target);
-                      }}
-                    >
-                      Search on Gallery
-                    </button>
-
+                    <button className="btn px-3 py-1 text-xs" onClick={() => setQuery(xHandle || discordName || "")}>Search on Gallery</button>
                     {openPost && (
-                      <a
-                        href={openPost}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn px-3 py-1 text-xs"
-                      >
+                      <a href={openPost} target="_blank" rel="noreferrer" className="btn px-3 py-1 text-xs">
                         Open Art Post
                       </a>
                     )}
-
                     <button
                       className="btn px-3 py-1 text-xs"
                       onClick={async () => {
@@ -272,6 +250,25 @@ export default function GalleryClient() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* === Modal preview === */}
+      {selected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="relative max-w-5xl w-full px-4">
+            <img
+              src={selected.url}
+              alt={selected.title}
+              className="w-full h-auto rounded-xl shadow-2xl object-contain"
+            />
+            <button
+              className="absolute top-4 right-6 bg-white/20 hover:bg-white/30 rounded-full p-2"
+              onClick={() => setSelected(null)}
+            >
+              <X className="w-6 h-6 text-white" />
+            </button>
+          </div>
         </div>
       )}
     </div>
