@@ -1,121 +1,135 @@
-// app/api/art/[id]/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextRequest, NextResponse } from "next/server";
-import { del } from "@vercel/blob";
-import { createHash } from "crypto";
+import { NextResponse } from "next/server";
+import { put } from "@vercel/blob";
+
+/** Normalisasi handle: selalu berawalan @, kosong = "" */
+function normHandle(v?: string) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const noAt = s.replace(/^@/, "");
+  return `@${noAt}`;
+}
+
+type PatchBody = {
+  token?: string;
+  metaUrl?: string;
+  patch?: Partial<{
+    title: string;
+    x: string;
+    discord: string;
+    postUrl: string;
+  }>;
+};
+
+/** Field yang boleh diedit */
+const ALLOWED_FIELDS = new Set(["title", "x", "discord", "postUrl"]);
+
+/** Load meta JSON dari metaUrl */
+async function loadMeta(metaUrl: string) {
+  const res = await fetch(metaUrl, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Load meta failed: ${res.status}`);
+  return res.json();
+}
+
+/** Merge patch ke meta lama (dengan normalisasi dan sanitasi) */
+function mergeMeta(curr: any, patch: PatchBody["patch"]) {
+  const next: any = { ...curr };
+  for (const k of Object.keys(patch || {})) {
+    if (!ALLOWED_FIELDS.has(k)) continue;
+    const val = (patch as any)[k];
+    if (k === "x" || k === "discord") {
+      next[k] = normHandle(val);
+    } else if (k === "postUrl") {
+      next[k] = String(val || "");
+    } else if (k === "title") {
+      next[k] = String(val || "");
+    }
+  }
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
 
 /**
- * DELETE /api/art/:id
- *
- * Body (JSON), two modes:
- * 1) Owner delete (default)
- *    { token: string, metaUrl: string }
- *    - token   : delete token saved in localStorage at submit time
- *    - metaUrl : URL to metadata JSON on Vercel Blob
- *    Server will:
- *      - fetch metaUrl
- *      - verify sha256(token) === meta.ownerTokenHash (or legacy: token === meta.deleteToken)
- *      - delete image (meta.imageUrl) and metadata (metaUrl)
- *
- * 2) Admin delete (override)
- *    { metaUrl: string }
- *    and send header:  x-admin-key: <your NEXT_PUBLIC_ADMIN_KEY>
- *    Server will check header against process.env.ADMIN_KEY, then delete without token check.
+ * Simpan meta ke path deterministik: fairblock/meta/{id}.json
+ * addRandomSuffix:false agar overwrite (bukan bikin file baru).
  */
-export async function DELETE(
-  req: NextRequest,
-  _ctx: { params: Promise<{ id: string }> } // Next.js 15: params is a Promise (not used here)
-) {
-  try {
-    const { token, metaUrl } = await req.json().catch(() => ({} as any));
+async function saveMeta(id: string, meta: any) {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    throw new Error("BLOB_READ_WRITE_TOKEN is missing");
+  }
+  const path = `fairblock/meta/${id}.json`;
+  const { url } = await put(path, JSON.stringify(meta, null, 2), {
+    access: "public",
+    contentType: "application/json",
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+    addRandomSuffix: false,
+    cacheControlMaxAge: 0,
+  });
+  return url;
+}
 
-    const RW = process.env.BLOB_READ_WRITE_TOKEN;
-    if (!RW) {
-      return NextResponse.json(
-        { error: "Server misconfigured: missing BLOB_READ_WRITE_TOKEN" },
-        { status: 500 }
-      );
-    }
+/** PATCH/PUT: update meta artwork */
+async function handleUpdate(req: Request, params: { id: string }) {
+  const id = params.id;
+  const body = (await req.json().catch(() => ({}))) as PatchBody;
 
-    // ---------------------------
-    // ADMIN OVERRIDE (header)
-    // ---------------------------
-    const adminHeader = req.headers.get("x-admin-key") || "";
-    const serverAdminKey = process.env.ADMIN_KEY || "";
-
-    if (serverAdminKey && adminHeader && adminHeader === serverAdminKey) {
-      if (!metaUrl) {
-        return NextResponse.json(
-          { error: "Missing token or metaUrl" },
-          { status: 400 }
-        );
-      }
-
-      // fetch meta to find imageUrl (best-effort)
-      try {
-        const metaRes = await fetch(metaUrl, { cache: "no-store" });
-        if (metaRes.ok) {
-          const meta: any = await metaRes.json().catch(() => ({}));
-          const tasks: Promise<any>[] = [];
-          if (meta?.imageUrl) tasks.push(del(meta.imageUrl, { token: RW }));
-          tasks.push(del(metaUrl, { token: RW }));
-          await Promise.allSettled(tasks);
-        } else {
-          // even if meta not found, still try to delete the metaUrl itself
-          await del(metaUrl, { token: RW }).catch(() => {});
-        }
-      } catch {
-        // ignore fetch/delete errors so admin flow is resilient
-      }
-
-      return NextResponse.json({ success: true, by: "admin" });
-    }
-
-    // ---------------------------
-    // OWNER DELETE (token check)
-    // ---------------------------
-    if (!token || !metaUrl) {
-      return NextResponse.json(
-        { error: "Missing token or metaUrl" },
-        { status: 400 }
-      );
-    }
-
-    // Load metadata
-    const metaRes = await fetch(metaUrl, { cache: "no-store" });
-    if (!metaRes.ok) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-    const meta: any = await metaRes.json();
-
-    // Verify ownership:
-    // - new model: sha256(token) === meta.ownerTokenHash
-    // - legacy   : token === meta.deleteToken
-    let isOwner = false;
-    if (meta?.ownerTokenHash) {
-      const tokenHash = createHash("sha256").update(token).digest("hex");
-      isOwner = tokenHash === meta.ownerTokenHash;
-    } else if (meta?.deleteToken) {
-      isOwner = token === meta.deleteToken;
-    }
-
-    if (!isOwner) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    // Delete image + meta
-    const tasks: Promise<any>[] = [];
-    if (meta?.imageUrl) tasks.push(del(meta.imageUrl, { token: RW }));
-    tasks.push(del(metaUrl, { token: RW }));
-    await Promise.allSettled(tasks);
-
-    return NextResponse.json({ success: true, by: "owner" });
-  } catch (err: any) {
+  if (!id || !body?.token || !body?.metaUrl || !body?.patch) {
     return NextResponse.json(
-      { error: err?.message || "Delete failed" },
+      { success: false, error: "Missing token, metaUrl or patch" },
+      { status: 400 }
+    );
+  }
+
+  // 1) Ambil meta lama
+  const curr = await loadMeta(body.metaUrl);
+
+  // 2) Validasi owner token (meta harus punya ownerToken yang sama)
+  const ownerTokenInMeta = curr?.ownerToken || curr?.token || curr?.owner_token;
+  if (!ownerTokenInMeta || ownerTokenInMeta !== body.token) {
+    return NextResponse.json(
+      { success: false, error: "Invalid token (not the owner)" },
+      { status: 401 }
+    );
+  }
+
+  // 3) Merge patch
+  const next = mergeMeta(curr, body.patch);
+
+  // Pastikan id & imageUrl tetap ada
+  next.id = String(curr.id || id);
+  next.imageUrl = curr.imageUrl || curr.url || "";
+
+  // 4) Simpan balik ke Blob (overwrite)
+  const newMetaUrl = await saveMeta(id, next);
+
+  return NextResponse.json({
+    success: true,
+    metaUrl: newMetaUrl,
+    meta: next,
+  });
+}
+
+export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+  try {
+    return await handleUpdate(req, ctx.params);
+  } catch (e: any) {
+    return NextResponse.json(
+      { success: false, error: e?.message || "Update failed" },
       { status: 500 }
     );
   }
+}
+
+// Dukung PUT juga
+export const PUT = PATCH;
+
+// Dukung POST override (X-HTTP-Method-Override: PATCH)
+export async function POST(req: Request, ctx: { params: { id: string } }) {
+  const hdr = req.headers.get("x-http-method-override");
+  if (hdr?.toUpperCase() === "PATCH") {
+    return PATCH(req, ctx);
+  }
+  return new Response("Method Not Allowed", { status: 405 });
 }
