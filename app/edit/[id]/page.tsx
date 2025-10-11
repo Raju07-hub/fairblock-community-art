@@ -38,7 +38,6 @@ export default function EditArtworkPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load artwork
   useEffect(() => {
     if (!id) return;
     (async () => {
@@ -63,7 +62,19 @@ export default function EditArtworkPage() {
     })();
   }, [id, router]);
 
-  // Save edit
+  // helper: parse response aman
+  async function parseResponse(resp: Response) {
+    const ct = resp.headers.get("content-type") || "";
+    if (resp.status === 204) return { ok: resp.ok, data: { success: true } };
+    if (ct.includes("application/json")) {
+      const data = await resp.json().catch(() => ({}));
+      return { ok: resp.ok, data };
+    }
+    const text = await resp.text().catch(() => "");
+    return { ok: resp.ok, data: resp.ok ? { success: true } : { success: false, error: text || resp.statusText } };
+  }
+
+  // Save changes – coba PATCH ⇒ PUT ⇒ POST override ⇒ POST /api/art (action:update)
   async function onSave() {
     if (!item) return;
 
@@ -86,39 +97,53 @@ export default function EditArtworkPage() {
         postUrl: postUrl.trim(),
       };
 
-      const url = `/api/art/${item.id}`;
+      const urlWithId = `/api/art/${item.id}`;
       const body = JSON.stringify({ token, metaUrl: item.metaUrl, patch });
 
-      // 1️⃣ Coba PATCH dulu
-      let resp = await fetch(url, {
+      // 1) PATCH
+      let resp = await fetch(urlWithId, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body,
       });
-
-      // 2️⃣ Kalau 405, coba PUT
       if (resp.status === 405) {
-        resp = await fetch(url, {
+        // 2) PUT
+        resp = await fetch(urlWithId, {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body,
         });
       }
-
-      // 3️⃣ Parsing aman
-      let data: any = null;
-      const ct = resp.headers.get("content-type") || "";
-      if (resp.status === 204) data = { success: true };
-      else if (ct.includes("application/json")) data = await resp.json();
-      else {
-        const text = await resp.text().catch(() => "");
-        data = resp.ok
-          ? { success: true }
-          : { success: false, error: text || resp.statusText };
+      if (resp.status === 405) {
+        // 3) POST override (ke /api/art/:id)
+        resp = await fetch(urlWithId, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-HTTP-Method-Override": "PATCH",
+          },
+          body: JSON.stringify({ token, metaUrl: item.metaUrl, patch, _method: "PATCH" }),
+        });
+      }
+      if (resp.status === 405) {
+        // 4) POST ke /api/art (tanpa :id) dgn action:update
+        resp = await fetch("/api/art", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "update",
+            id: item.id,
+            token,
+            metaUrl: item.metaUrl,
+            patch,
+          }),
+        });
       }
 
-      if (!resp.ok || data?.success === false) {
-        throw new Error(data?.error || `${resp.status} ${resp.statusText}`);
+      const { ok, data } = await parseResponse(resp);
+      if (!ok || data?.success === false) {
+        const msg = data?.error || `${resp.status} ${resp.statusText}`;
+        throw new Error(msg);
       }
 
       alert("Saved successfully!");
@@ -134,12 +159,8 @@ export default function EditArtworkPage() {
     return (
       <div className="max-w-2xl mx-auto px-5 sm:px-6 py-10">
         <div className="mb-5 flex gap-3">
-          <button className="btn" onClick={() => router.back()}>
-            ⬅ Back
-          </button>
-          <Link className="btn" href="/gallery">
-            🏞️ Gallery
-          </Link>
+          <button className="btn" onClick={() => router.back()}>⬅ Back</button>
+          <Link className="btn" href="/gallery">🏞️ Gallery</Link>
         </div>
         <p className="opacity-70">Loading…</p>
       </div>
@@ -151,12 +172,8 @@ export default function EditArtworkPage() {
   return (
     <div className="max-w-2xl mx-auto px-5 sm:px-6 py-10">
       <div className="mb-5 flex gap-3">
-        <button className="btn" onClick={() => router.back()}>
-          ⬅ Back
-        </button>
-        <Link className="btn" href="/gallery">
-          🏞️ Gallery
-        </Link>
+        <button className="btn" onClick={() => router.back()}>⬅ Back</button>
+        <Link className="btn" href="/gallery">🏞️ Gallery</Link>
       </div>
 
       <h1 className="text-2xl font-bold mb-6">Edit Artwork</h1>
@@ -211,9 +228,7 @@ export default function EditArtworkPage() {
           <button onClick={onSave} disabled={saving} className="btn">
             {saving ? "Saving…" : "Save Changes"}
           </button>
-          <button className="btn" onClick={() => router.back()}>
-            Cancel
-          </button>
+          <button className="btn" onClick={() => router.back()}>Cancel</button>
         </div>
       </div>
     </div>
