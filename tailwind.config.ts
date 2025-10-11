@@ -1,6 +1,6 @@
-import type { Config } from "tailwindcss"
+import type { Config } from "tailwindcss";
 
-export default {
+const config: Config = {
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -14,9 +14,11 @@ export default {
       boxShadow: { glow: "0 0 40px rgba(138,124,255,0.35)" },
       backgroundImage: {
         "radial-dark":
-          "radial-gradient(1200px 600px at 50% 20%, rgba(138,124,255,0.25), rgba(0,0,0,0))"
-      }
+          "radial-gradient(1200px 600px at 50% 20%, rgba(138,124,255,0.25), rgba(0,0,0,0))",
+      },
     },
   },
   plugins: [],
-} satisfies Config
+};
+
+export default config;

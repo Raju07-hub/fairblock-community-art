@@ -60,9 +60,7 @@ body {
     cursor: pointer;
     transition: border-color 0.3s ease;
   }
-  .dropzone:hover {
-    border-color: #19C3FF;
-  }
+  .dropzone:hover { border-color: #19C3FF; }
 }
 
 /* Input agar kontras */
@@ -88,15 +86,8 @@ input[type="text"], input[type="search"] {
   box-shadow: 0 0 30px rgba(25,195,255,.25);
 }
 
-.dropzone__hint {
-  color: rgba(255,255,255,.75);
-  font-size: .95rem;
-}
-.dropzone__sub {
-  color: rgba(255,255,255,.55);
-  font-size: .8rem;
-  margin-top: .35rem;
-}
+.dropzone__hint { color: rgba(255,255,255,.75); font-size: .95rem; }
+.dropzone__sub { color: rgba(255,255,255,.55); font-size: .8rem; margin-top: .35rem; }
 
 /* ==== Footer TipMe ==== */
 .footer-tip {
@@ -104,15 +95,8 @@ input[type="text"], input[type="search"] {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
-
-.footer-tip img {
-  @apply h-10 w-10 rounded-md object-contain;
-  border: 1px solid rgba(255,255,255,0.15);
-}
-
-.footer-tip .addr {
-  @apply text-[10px] text-white/60 hover:text-white/80 text-left;
-}
+.footer-tip img { @apply h-10 w-10 rounded-md object-contain; border: 1px solid rgba(255,255,255,0.15); }
+.footer-tip .addr { @apply text-[10px] text-white/60 hover:text-white/80 text-left; }
 
 /* Safe area helper (iOS) */
 :root { --safe-bottom: env(safe-area-inset-bottom, 0px); }
@@ -123,45 +107,14 @@ footer { padding-bottom: max(0px, var(--safe-bottom)); }
   @apply absolute top-3 right-3 rounded-full bg-white/15 backdrop-blur px-3 py-1
          flex items-center gap-1 text-sm transition hover:bg-white/25;
 }
-
-/* Active state when user already liked */
-.badge-like[aria-pressed="true"] {
-  @apply bg-pink-500/80 text-white pointer-events-none;
-}
+.badge-like[aria-pressed="true"] { @apply bg-pink-500/80 text-white pointer-events-none; }
 
 /* --- Like badge (kanan) --- */
-.badge-like-big{
-  @apply inline-flex items-center gap-2 px-3 py-1 rounded-full ring-1 ring-white/10 transition;
-  @apply bg-white/10 text-white hover:bg-white/15;
-}
-.badge-like-big.liked{
-  @apply bg-pink-500/80 text-white;
-}
+.badge-like-big{ @apply inline-flex items-center gap-2 px-3 py-1 rounded-full ring-1 ring-white/10 transition; @apply bg-white/10 text-white hover:bg-white/15; }
+.badge-like-big.liked{ @apply bg-pink-500/80 text-white; }
 
 /* --- Burst animation --- */
 @keyframes like-pop { 0%{ transform: scale(0.6); opacity:0 } 60%{ transform: scale(1.25); opacity:1 } 100%{ transform: scale(1); opacity:0 } }
 @keyframes like-float { 0%{ transform: translateY(0) } 100%{ transform: translateY(-18px) } }
-
 .like-burst { animation: like-float 600ms ease-out forwards; }
 .like-burst-heart { color: #f472b6; fill: currentColor; animation: like-pop 600ms ease-out forwards; }
-
-/* === Smooth fade-in for gallery images === */
-@keyframes fadeIn {
-  0%   { opacity: 0; transform: scale(1.01); }
-  100% { opacity: 1; transform: scale(1); }
-}
-.animate-fadeIn {
-  animation: fadeIn 0.7s ease forwards;
-}
-
-/* (opsional) bikin rendering gambar lebih tajam di beberapa browser */
-.img-crisp {
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
-}
-
-/* (opsional) util card premium jika mau pakai lagi di tempat lain */
-.card-premium {
-  @apply group relative rounded-2xl overflow-hidden bg-gradient-to-br from-white/10 to-white/5 border border-white/10 shadow-[0_0_30px_rgba(0,0,0,0.25)] hover:shadow-[0_0_40px_rgba(0,0,0,0.35)] transition-all duration-500;
-}
-
