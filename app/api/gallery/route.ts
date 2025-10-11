@@ -23,7 +23,7 @@ export async function GET() {
     const { blobs } = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
       prefix: "fairblock/meta/",
-      limit: 100,
+      limit: 200,
     });
 
     const items = await Promise.all(
@@ -33,7 +33,8 @@ export async function GET() {
           if (!res.ok) return null;
           const meta = await res.json();
 
-          const imageUrl: string | undefined = meta.imageUrl || meta.url;
+          const imageUrl: string | undefined = meta.imageUrl || meta.url; // fallback lama
+
           if (!meta?.id || !meta?.title || !imageUrl) return null;
 
           return {
@@ -42,9 +43,9 @@ export async function GET() {
             x: meta.x ? String(meta.x) : undefined,
             discord: meta.discord ? String(meta.discord) : undefined,
             url: imageUrl,
-            createdAt: String(meta.createdAt || ""),
-            metaUrl: b.url,
             postUrl: meta.postUrl ? String(meta.postUrl) : undefined, // NEW
+            createdAt: String(meta.createdAt || ""),
+            metaUrl: b.url, // penting utk edit/delete
           };
         } catch {
           return null;
@@ -53,7 +54,9 @@ export async function GET() {
     );
 
     const filtered = (items.filter(Boolean) as any[]).sort(
-      (a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0)
+      (a, b) =>
+        (new Date(b.createdAt).getTime() || 0) -
+        (new Date(a.createdAt).getTime() || 0)
     );
 
     return NextResponse.json({

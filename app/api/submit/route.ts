@@ -14,15 +14,6 @@ function extFromMime(m: string) {
   return "bin";
 }
 
-function isHttpUrl(s: string): boolean {
-  try {
-    const u = new URL(s);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 export async function POST(req: Request) {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -36,7 +27,7 @@ export async function POST(req: Request) {
     const title = String(form.get("title") || "").trim();
     const x = String(form.get("x") || "").trim();
     const discord = String(form.get("discord") || "").trim();
-    const postUrlRaw = String(form.get("postUrl") || "").trim(); // NEW
+    const postUrl = String(form.get("postUrl") || "").trim(); // NEW
     const file = form.get("file") as File | null;
 
     if (!title) {
@@ -67,7 +58,7 @@ export async function POST(req: Request) {
     const { put } = await import("@vercel/blob");
     const bytes = Buffer.from(await file.arrayBuffer());
 
-    // 1) upload image
+    // 1) upload gambar
     const imageKey = `fairblock/img/${id}.${ext}`;
     const image = await put(imageKey, bytes, {
       access: "public",
@@ -75,26 +66,20 @@ export async function POST(req: Request) {
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
 
-    // 2) save metadata
+    // 2) simpan metadata (pakai imageUrl + postUrl)
     const metaKey = `fairblock/meta/${id}.json`;
-
-    const postUrl = postUrlRaw && isHttpUrl(postUrlRaw) ? postUrlRaw : ""; // sanitize
-
     const meta = {
       id,
       title,
       x,
       discord,
-      imageUrl: image.url, // use "imageUrl" for consistency (gallery falls back to meta.url)
+      postUrl: postUrl || undefined,       // NEW
+      imageUrl: image.url,                 // NEW (ganti dari url)
       createdAt,
       ownerTokenHash,
-      // keep legacy for old clients (optional):
-      url: image.url,
-      // NEW:
-      postUrl,
     };
 
-    const metaBlob = await put(metaKey, Buffer.from(JSON.stringify(meta, null, 2)), {
+    const metaBlob = await put(metaKey, Buffer.from(JSON.stringify(meta)), {
       access: "public",
       contentType: "application/json",
       token: process.env.BLOB_READ_WRITE_TOKEN,
@@ -106,7 +91,7 @@ export async function POST(req: Request) {
       url: image.url,
       metaUrl: metaBlob.url,
       ownerTokenHash,
-      deleteToken, // return for client to store
+      deleteToken, // simpan di localStorage sisi klien
     });
   } catch (err: any) {
     return NextResponse.json(
