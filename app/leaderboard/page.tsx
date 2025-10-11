@@ -3,9 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-// ==========================
-// Types
-// ==========================
 type TopItem = { id: string; score?: number; likes?: number; title?: string; owner?: string };
 type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; createdAt: string };
 type CreatorRow = { user: string; uploads: number };
@@ -13,9 +10,7 @@ type CreatorRow = { user: string; uploads: number };
 type Scope = "daily" | "weekly" | "alltime";
 type Mode = "current" | "previous";
 
-// ==========================
-// Helper Components
-// ==========================
+// =========== Segmented Buttons ===========
 function Segmented<T extends string>({
   value, options, onChange, className = ""
 }: {
@@ -41,9 +36,7 @@ function Segmented<T extends string>({
   );
 }
 
-// ==========================
-// Utility Functions
-// ==========================
+// =========== Utils ===========
 const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
 function nextDailyResetUTC(now = new Date()): Date {
   const targetMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
@@ -72,9 +65,7 @@ function handleFromItem(it: GalleryItem): string {
   return d ? `@${d}` : "";
 }
 
-// ==========================
-// Page Component
-// ==========================
+// =========== Page ===========
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("daily");
   const [mode, setMode] = useState<Mode>("current");
@@ -91,9 +82,6 @@ export default function LeaderboardPage() {
   const badgeSm = "px-2.5 py-0.5 rounded-full text-xs font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
   const heading = "text-2xl font-bold mb-3 text-[#3aaefc]";
 
-  // ==========================
-  // Data Fetcher
-  // ==========================
   async function load() {
     setLoading(true);
     try {
@@ -138,6 +126,21 @@ export default function LeaderboardPage() {
 
   const byId = useMemo(() => new Map(gallery.map(it => [it.id, it])), [gallery]);
 
+  // Fallback: compute all-time uploads from existing gallery data
+  const uploadsAllTime = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of gallery) {
+      const h = handleFromItem(it);
+      if (!h) continue;
+      m.set(h, (m.get(h) || 0) + 1);
+    }
+    return Array.from(m.entries()).map(([user, uploads]) => ({ user, uploads }));
+  }, [gallery]);
+
+  // Use period creators if available; otherwise fallback to all-time uploads
+  const creatorsDisplay: CreatorRow[] =
+    topCreators.length > 0 ? topCreators : uploadsAllTime;
+
   const resetLabel =
     scope === "weekly"
       ? "Weekly reset: every Saturday at 00:00 UTC+7"
@@ -150,9 +153,6 @@ export default function LeaderboardPage() {
       ? "🏆 Top Art (All Time)"
       : `🏆 Top Art (${scope} — ${mode})${keyDate ? ` · ${keyDate}` : ""}`;
 
-  // ==========================
-  // Render
-  // ==========================
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
       <div className="flex items-center justify-between mb-6 gap-3">
@@ -198,12 +198,12 @@ export default function LeaderboardPage() {
         <p className="text-white/70">Loading…</p>
       ) : (
         <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.2fr)_minmax(0,0.9fr)] gap-6">
-          {/* --- Top Art --- */}
+          {/* Top Art */}
           <section>
             <h2 className={heading}>{headerTitle}</h2>
             {topArts.length === 0 ? (
               <div className="opacity-70 text-sm mt-3">
-                Belum ada data untuk periode ini. Coba kasih ❤️ di Gallery, lalu klik Refresh.
+                No data for this period yet. Try giving a ❤️ in the Gallery, then press Refresh.
               </div>
             ) : (
               <div className="space-y-3">
@@ -225,6 +225,7 @@ export default function LeaderboardPage() {
                           <span className="w-7 text-center opacity-70">{idx + 1}.</span>
                           <div className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl overflow-hidden bg-white/10 shrink-0 shadow-md">
                             {g?.url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
                               <img
                                 src={g.url}
                                 alt={name}
@@ -263,18 +264,16 @@ export default function LeaderboardPage() {
             )}
           </section>
 
-          {/* --- Top Creators (uploads-based) --- */}
+          {/* Top Creators (uploads) */}
           <section>
             <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
-            {topCreators.length === 0 ? (
-              <div className="opacity-70 text-sm mt-3">
-                Belum ada upload terhitung di periode ini.
-              </div>
+            {creatorsDisplay.length === 0 ? (
+              <div className="opacity-70 text-sm mt-3">No uploads counted.</div>
             ) : (
               <div className="space-y-3">
-                {topCreators
+                {creatorsDisplay
                   .slice(0, 50)
-                  .sort((a, b) => (b.uploads - a.uploads))
+                  .sort((a, b) => b.uploads - a.uploads)
                   .slice(0, 10)
                   .map((c, idx) => {
                     const handle = c.user?.startsWith("@") ? c.user : `@${c.user}`;
@@ -287,7 +286,7 @@ export default function LeaderboardPage() {
                           <div className="min-w-0">
                             <div className="font-medium truncate text-[15px]">{handle}</div>
                             <div className="text-xs opacity-60">
-                              Uploads{scope !== "alltime" ? " (period)" : ""}: {c.uploads}
+                              Uploads{scope !== "alltime" && topCreators.length > 0 ? " (period)" : ""}: {c.uploads}
                             </div>
                             <div className="mt-2 flex flex-wrap gap-2">
                               <Link href={galleryLink} className={btnSm}>Search on Gallery</Link>
@@ -307,3 +306,4 @@ export default function LeaderboardPage() {
     </div>
   );
 }
+

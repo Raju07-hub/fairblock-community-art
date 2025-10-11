@@ -7,7 +7,6 @@ import { ymd, isoWeek } from "@/lib/period";
 const cKey = (id: string) => `likes:count:${id}`;
 const uKey = (uid: string, id: string) => `likes:user:${uid}:${id}`;
 
-// Periode terakhir saat user LIKE (untuk rollback UNLIKE yang lintas hari/minggu)
 const lastDailyKey = (uid: string, id: string) => `likes:lastDaily:${uid}:${id}`;
 const lastWeeklyKey = (uid: string, id: string) => `likes:lastWeekly:${uid}:${id}`;
 
@@ -23,7 +22,8 @@ function lbKeys(day: string, week: string) {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const id = String(body?.id || "");
-  const author = String(body?.author || "");
+  const author = String(body?.author || ""); // optional
+
   if (!id) return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
 
   const res = new NextResponse();
@@ -35,12 +35,13 @@ export async function POST(req: NextRequest) {
 
   const day = ymd();
   const week = isoWeek();
+  const keys = lbKeys(day, week);
 
   let liked: boolean;
   let count: number;
 
   if (alreadyLiked) {
-    // UNLIKE → rollback ke periode LIKE sebelumnya
+    // UNLIKE: rollback to the period when LIKE happened
     const curCount = (await kv.get<number | null>(cKey(id))) ?? 0;
     count = curCount > 0 ? await kv.decr(cKey(id)) : 0;
     await kv.decr(userFlagKey);
@@ -50,14 +51,20 @@ export async function POST(req: NextRequest) {
     const lastWeek = (await kv.get<string | null>(lastWeeklyKey(uid!, id))) || week;
     const back = lbKeys(lastDay, lastWeek);
 
+    // Always update ART leaderboards (even if author is empty)
+    await Promise.all([
+      (kv as any).zincrby(back.artDaily, -1, id),
+      (kv as any).zincrby(back.artWeekly, -1, id),
+    ]);
+
+    // Only update CREATOR if author is present
     if (author) {
       await Promise.all([
-        (kv as any).zincrby(back.artDaily, -1, id),
-        (kv as any).zincrby(back.artWeekly, -1, id),
         (kv as any).zincrby(back.creatorDaily, -1, author),
         (kv as any).zincrby(back.creatorWeekly, -1, author),
       ]);
     }
+
     await Promise.all([
       kv.del(lastDailyKey(uid!, id)),
       kv.del(lastWeeklyKey(uid!, id)),
@@ -68,15 +75,20 @@ export async function POST(req: NextRequest) {
     await kv.incr(userFlagKey);
     liked = true;
 
-    const fwd = lbKeys(day, week);
+    // Always update ART leaderboards
+    await Promise.all([
+      (kv as any).zincrby(keys.artDaily, 1, id),
+      (kv as any).zincrby(keys.artWeekly, 1, id),
+    ]);
+
+    // Only update CREATOR if author is present
     if (author) {
       await Promise.all([
-        (kv as any).zincrby(fwd.artDaily, 1, id),
-        (kv as any).zincrby(fwd.artWeekly, 1, id),
-        (kv as any).zincrby(fwd.creatorDaily, 1, author),
-        (kv as any).zincrby(fwd.creatorWeekly, 1, author),
+        (kv as any).zincrby(keys.creatorDaily, 1, author),
+        (kv as any).zincrby(keys.creatorWeekly, 1, author),
       ]);
     }
+
     await Promise.all([
       kv.set(lastDailyKey(uid!, id), day),
       kv.set(lastWeeklyKey(uid!, id), week),
