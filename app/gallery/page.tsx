@@ -1,8 +1,8 @@
-// app/gallery/page.tsx  (Server wrapper + Client content in one file)
+// app/gallery/page.tsx
 import { Suspense } from "react";
 import GalleryClient from "./page.client";
 
-export const dynamic = "force-dynamic"; // hindari SSG yang bikin galat saat pakai search params
+export const dynamic = "force-dynamic";
 
 export default function Page() {
   return (

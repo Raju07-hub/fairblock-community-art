@@ -48,6 +48,12 @@ export default function GalleryClient() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // 👇 NEW: sinkronkan state query setiap URL ?search= berubah
+  useEffect(() => {
+    const incoming = (searchParams.get("search") || searchParams.get("q") || "").trim();
+    setQuery(incoming);
+  }, [searchParams]);
+
   async function load() {
     setLoading(true);
     try {
@@ -67,14 +73,14 @@ export default function GalleryClient() {
 
   useEffect(() => { load(); }, []);
 
-  // Sinkronkan input -> URL (?search=)
+  // sinkronkan input -> URL (?search=)
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const curr = sp.get("search") || "";
     if (query !== curr) {
       if (query) sp.set("search", query);
       else sp.delete("search");
-      sp.delete("q"); // bersihkan param lama
+      sp.delete("q");
       router.replace(`/gallery?${sp.toString()}`);
     }
   }, [query, router]);
@@ -159,7 +165,6 @@ export default function GalleryClient() {
             const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
             const openPost = it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl) ? it.postUrl : "";
             const queryKey = xHandle || discordName || it.title;
-            const searchLink = `/gallery?search=${encodeURIComponent(queryKey)}`;
             const isOwner = !!getOwnerTokenFor(it.id);
 
             return (
@@ -196,7 +201,21 @@ export default function GalleryClient() {
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Link href={searchLink} className="btn px-3 py-1 text-xs">Search on Gallery</Link>
+                    {/* 🔎 Tombol search yang bekerja di halaman yang sama */}
+                    <button
+                      className="btn px-3 py-1 text-xs"
+                      onClick={() => {
+                        const target = queryKey || "";
+                        setQuery(target);
+                        const sp = new URLSearchParams(window.location.search);
+                        if (target) sp.set("search", target); else sp.delete("search");
+                        sp.delete("q");
+                        router.replace(`/gallery?${sp.toString()}`);
+                      }}
+                    >
+                      Search on Gallery
+                    </button>
+
                     {openPost && (
                       <a href={openPost} target="_blank" rel="noreferrer" className="btn px-3 py-1 text-xs">
                         Open Art Post
@@ -208,7 +227,7 @@ export default function GalleryClient() {
                     >
                       Copy Discord
                     </button>
-                    {/* tombol like bawah dihapus: sudah di overlay */}
+                    {/* tombol like di bawah dihapus—sudah ada di overlay */}
                   </div>
 
                   {isOwner && (
