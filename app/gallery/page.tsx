@@ -1,4 +1,3 @@
-// app/gallery/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -12,7 +11,7 @@ type GalleryItem = {
   discord?: string;
   createdAt: string;
   metaUrl: string;
-  postUrl?: string; // ← NEW: open art post
+  postUrl?: string;
 };
 
 type LikeMap = Record<
@@ -23,10 +22,7 @@ type LikeMap = Record<
   }
 >;
 
-const btn = "btn px-4 py-1 rounded-full text-sm";
-const pill = "btn px-3 py-1 rounded-full text-xs";
-const counter =
-  "flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 text-white/90";
+const brandGradient = "from-[#3aaefc] to-[#4af2ff]";
 
 function normHandle(x?: string) {
   if (!x) return "";
@@ -44,15 +40,6 @@ function getOwnerTokenFor(id: string): string | null {
   }
 }
 
-function setOwnerTokenFor(id: string, token: string) {
-  try {
-    const raw = localStorage.getItem("fairblock:tokens");
-    const map = raw ? JSON.parse(raw) : {};
-    map[id] = token;
-    localStorage.setItem("fairblock:tokens", JSON.stringify(map));
-  } catch {}
-}
-
 export default function GalleryPage() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [likes, setLikes] = useState<LikeMap>({});
@@ -60,7 +47,6 @@ export default function GalleryPage() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // load gallery
   async function load() {
     setLoading(true);
     try {
@@ -86,7 +72,6 @@ export default function GalleryPage() {
     load();
   }, []);
 
-  // like/unlike
   async function toggleLike(it: GalleryItem) {
     const body = { id: it.id, author: normHandle(it.x || it.discord || "") };
     const j = await fetch("/api/like", {
@@ -102,7 +87,6 @@ export default function GalleryPage() {
     }
   }
 
-  // delete
   async function onDelete(it: GalleryItem) {
     const token = getOwnerTokenFor(it.id);
     if (!token) return alert("Delete token not found for this artwork.");
@@ -120,12 +104,6 @@ export default function GalleryPage() {
     }
   }
 
-  // helper: apakah viewer adalah owner (punya token lokal)
-  function isOwner(it: GalleryItem) {
-    return !!getOwnerTokenFor(it.id);
-  }
-
-  // filter
   const filtered = useMemo(() => {
     let list = items;
     if (query.trim()) {
@@ -136,47 +114,39 @@ export default function GalleryPage() {
       });
     }
     if (onlyMine) {
-      list = list.filter((it) => isOwner(it));
+      list = list.filter((it) => !!getOwnerTokenFor(it.id));
     }
     return list;
   }, [items, query, onlyMine]);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-      {/* Top bar */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <Link href="/" className="btn">
-          ← Back Home
-        </Link>
-        <Link href="/submit" className="btn">
-          + Submit Art
-        </Link>
-        <Link href="/leaderboard" className="btn">
-          🏆 Leaderboard
-        </Link>
+    <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div className="flex gap-3">
+          <Link href="/" className="btn">⬅ Back Home</Link>
+          <Link href="/submit" className="btn">＋ Submit Art</Link>
+          <Link href="/leaderboard" className="btn">🏆 Leaderboard</Link>
+        </div>
 
-        <div className="flex-1" />
-        <button onClick={load} className="btn">
-          ↻ Refresh
-        </button>
-      </div>
-
-      {/* Search & filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search title / @x / discord…"
-          className="w-full sm:w-96 px-4 py-2 rounded-xl bg-white/10 outline-none"
-        />
-        <label className="flex items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-3">
           <input
-            type="checkbox"
-            checked={onlyMine}
-            onChange={(e) => setOnlyMine(e.target.checked)}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search title / @x / discord..."
+            className="px-4 py-2 rounded-xl bg-white/10 outline-none w-56"
           />
-          Only My Uploads
-        </label>
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={onlyMine}
+              onChange={(e) => setOnlyMine(e.target.checked)}
+            />
+            Only My Uploads
+          </label>
+          <button onClick={load} className="btn">
+            ↻ {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       <h1 className="text-2xl font-bold mb-4">Gallery</h1>
@@ -184,129 +154,104 @@ export default function GalleryPage() {
       {loading ? (
         <p className="opacity-70">Loading…</p>
       ) : (
-        <>
-          <p className="opacity-70 mb-3">
-            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
-          </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filtered.map((it) => {
+            const like = likes[it.id] || { count: 0, liked: false };
+            const xHandle = normHandle(it.x);
+            const discordName = it.discord?.replace(/^@/, "");
+            const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
+            const openPost =
+              it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl)
+                ? it.postUrl
+                : "";
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filtered.map((it) => {
-              const like = likes[it.id] || { count: 0, liked: false };
-              const handle = normHandle(it.x || it.discord || "");
-              const xUrl =
-                it.x && handle
-                  ? `https://x.com/${handle.replace(/^@/, "")}`
-                  : "";
-              const openPost =
-                it.postUrl &&
-                /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl)
-                  ? it.postUrl
-                  : "";
-
-              return (
-                <div
-                  key={it.id}
-                  className="rounded-2xl overflow-hidden bg-white/5 shadow-lg"
-                >
-                  {/* Image */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={it.url}
-                    alt={it.title}
-                    className="w-full aspect-[4/3] object-cover"
-                    loading="lazy"
-                    decoding="async"
-                  />
-
-                  {/* Body */}
-                  <div className="p-4">
-                    <div className="font-semibold">{it.title || "Untitled"}</div>
-
-                    <div className="mt-1 text-sm text-white/70 flex items-center gap-2">
-                      {it.x && (
-                        <a
-                          className="underline"
-                          href={xUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {normHandle(it.x)}
-                        </a>
-                      )}
-                      {it.discord && (
-                        <>
-                          <span>·</span>
-                          <span>{normHandle(it.discord)}</span>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Actions row */}
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Link
-                        href={`/gallery?select=${encodeURIComponent(it.id)}`}
-                        className={pill}
+            return (
+              <div
+                key={it.id}
+                className="bg-white/5 rounded-2xl overflow-hidden shadow-lg backdrop-blur-md hover:scale-[1.02] transition-transform"
+              >
+                <img
+                  src={it.url}
+                  alt={it.title}
+                  className="w-full aspect-[4/3] object-cover"
+                />
+                <div className="p-4">
+                  <div className="font-semibold truncate">{it.title}</div>
+                  <div className="text-sm text-white/70 mt-1">
+                    {xHandle && (
+                      <a
+                        href={xUrl}
+                        className="underline text-[#4af2ff]"
+                        target="_blank"
+                        rel="noreferrer"
                       >
-                        See on Gallery
-                      </Link>
-
-                      {openPost && (
-                        <a
-                          href={openPost}
-                          className={pill}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open Art Post
-                        </a>
-                      )}
-
-                      {it.discord && (
-                        <button
-                          className={pill}
-                          onClick={() =>
-                            navigator.clipboard.writeText(it.discord!)
-                          }
-                        >
-                          Copy Discord
-                        </button>
-                      )}
-
-                      <button
-                        className={counter}
-                        onClick={() => toggleLike(it)}
-                        title={like.liked ? "Unlike" : "Like"}
-                      >
-                        <span>💙</span>
-                        <span>{like.count}</span>
-                      </button>
-
-                      {/* Owner controls */}
-                      {isOwner(it) && (
-                        <>
-                          <Link
-                            href={`/edit/${it.id}`}
-                            className={pill}
-                            title="Edit this artwork"
-                          >
-                            ✏️ Edit
-                          </Link>
-                          <button
-                            className={pill}
-                            onClick={() => onDelete(it)}
-                            title="Delete this artwork"
-                          >
-                            🗑 Delete
-                          </button>
-                        </>
-                      )}
-                    </div>
+                        {xHandle}
+                      </a>
+                    )}
+                    {discordName && (
+                      <>
+                        <span> · </span>
+                        <span>{discordName}</span>
+                      </>
+                    )}
                   </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link
+                      href={`/gallery?select=${encodeURIComponent(it.id)}`}
+                      className="btn px-3 py-1 text-xs"
+                    >
+                      See on Gallery
+                    </Link>
+                    {openPost && (
+                      <a
+                        href={openPost}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn px-3 py-1 text-xs"
+                      >
+                        Open Art Post
+                      </a>
+                    )}
+                    <button
+                      className="btn px-3 py-1 text-xs"
+                      onClick={() => navigator.clipboard.writeText(discordName || "")}
+                    >
+                      Copy Discord
+                    </button>
+                    <button
+                      onClick={() => toggleLike(it)}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 ${
+                        like.liked
+                          ? `bg-gradient-to-r ${brandGradient}`
+                          : "bg-white/10"
+                      }`}
+                    >
+                      💙 {like.count}
+                    </button>
+                  </div>
+
+                  {getOwnerTokenFor(it.id) && (
+                    <div className="mt-3 flex gap-2">
+                      <Link
+                        href={`/edit/${it.id}`}
+                        className="btn px-3 py-1 text-xs bg-white/10"
+                      >
+                        ✏️ Edit
+                      </Link>
+                      <button
+                        onClick={() => onDelete(it)}
+                        className="btn px-3 py-1 text-xs bg-red-500/30"
+                      >
+                        🗑 Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-        </>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
