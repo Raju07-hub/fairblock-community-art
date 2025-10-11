@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+/** ===== Types ===== */
 type TopItem = { id: string; score?: number; likes?: number; title?: string; owner?: string };
 type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; createdAt: string };
 type CreatorRow = { user: string; uploads: number };
@@ -10,7 +11,7 @@ type CreatorRow = { user: string; uploads: number };
 type Scope = "daily" | "weekly" | "alltime";
 type Mode = "current" | "previous";
 
-// =========== Segmented Buttons ===========
+/** ===== Segmented Buttons (compact & tidy) ===== */
 function Segmented<T extends string>({
   value, options, onChange, className = ""
 }: {
@@ -20,24 +21,28 @@ function Segmented<T extends string>({
   className?: string;
 }) {
   return (
-    <div className={`inline-flex rounded-full bg-white/10 p-1 ${className}`}>
-      {options.map(opt => (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          className={`px-3 py-1 rounded-full text-sm transition
-            ${value === opt.value ? "bg-white/20 text-white" : "text-white/75 hover:text-white"}`}
-          aria-pressed={value === opt.value}
-        >
-          {opt.label}
-        </button>
-      ))}
+    <div className={`inline-flex rounded-full bg-white/10 p-0.5 gap-1 ${className}`}>
+      {options.map(opt => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className={`px-2.5 py-1 rounded-full text-xs sm:text-sm transition whitespace-nowrap
+              ${active ? "bg-white/20 text-white shadow" : "text-white/75 hover:text-white"}`}
+            aria-pressed={active}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-// =========== Utils ===========
+/** ===== Utils ===== */
 const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
+
 function nextDailyResetUTC(now = new Date()): Date {
   const targetMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
   return new Date(targetMs);
@@ -65,7 +70,7 @@ function handleFromItem(it: GalleryItem): string {
   return d ? `@${d}` : "";
 }
 
-// =========== Page ===========
+/** ===== Page ===== */
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("daily");
   const [mode, setMode] = useState<Mode>("current");
@@ -85,6 +90,7 @@ export default function LeaderboardPage() {
   async function load() {
     setLoading(true);
     try {
+      // Load gallery items (for joining title/owner/image)
       const g = await fetch(`/api/gallery`, { cache: "no-store" })
         .then(res => res.json()).catch(() => ({}));
       setGallery(g?.items ?? []);
@@ -126,7 +132,7 @@ export default function LeaderboardPage() {
 
   const byId = useMemo(() => new Map(gallery.map(it => [it.id, it])), [gallery]);
 
-  // Fallback: compute all-time uploads from existing gallery data
+  // Fallback: compute all-time uploads from gallery data (used when period creators is empty)
   const uploadsAllTime = useMemo(() => {
     const m = new Map<string, number>();
     for (const it of gallery) {
@@ -137,7 +143,6 @@ export default function LeaderboardPage() {
     return Array.from(m.entries()).map(([user, uploads]) => ({ user, uploads }));
   }, [gallery]);
 
-  // Use period creators if available; otherwise fallback to all-time uploads
   const creatorsDisplay: CreatorRow[] =
     topCreators.length > 0 ? topCreators : uploadsAllTime;
 
@@ -161,10 +166,14 @@ export default function LeaderboardPage() {
           <Link href="/gallery" className="btn">🖼️ Gallery</Link>
           <Link href="/submit" className="btn">＋ Submit</Link>
         </div>
-        <div className="flex items-center gap-2">
+
+        {/* Controls (tidy, compact, wraps nicely) */}
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="hidden sm:flex flex-col items-end mr-2">
             <span className="text-xs opacity-70">{resetLabel}</span>
-            {scope !== "alltime" && <span className="text-sm font-semibold text-[#3aaefc]">Resets in {countdown}</span>}
+            {scope !== "alltime" && (
+              <span className="text-sm font-semibold text-[#3aaefc]">Resets in {countdown}</span>
+            )}
           </div>
 
           <Segmented
@@ -198,7 +207,7 @@ export default function LeaderboardPage() {
         <p className="text-white/70">Loading…</p>
       ) : (
         <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.2fr)_minmax(0,0.9fr)] gap-6">
-          {/* Top Art */}
+          {/* ===== Top Art ===== */}
           <section>
             <h2 className={heading}>{headerTitle}</h2>
             {topArts.length === 0 ? (
@@ -223,6 +232,7 @@ export default function LeaderboardPage() {
                       <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
                         <div className="flex items-center gap-4 min-w-0">
                           <span className="w-7 text-center opacity-70">{idx + 1}.</span>
+
                           <div className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl overflow-hidden bg-white/10 shrink-0 shadow-md">
                             {g?.url ? (
                               // eslint-disable-next-line @next/next/no-img-element
@@ -239,6 +249,7 @@ export default function LeaderboardPage() {
                               <span className="text-xs opacity-50">No Image</span>
                             )}
                           </div>
+
                           <div className="min-w-0">
                             <div className="font-medium truncate text-base">
                               {name}{" "}
@@ -264,7 +275,7 @@ export default function LeaderboardPage() {
             )}
           </section>
 
-          {/* Top Creators (uploads) */}
+          {/* ===== Top Creators (uploads) ===== */}
           <section>
             <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
             {creatorsDisplay.length === 0 ? (
@@ -306,4 +317,3 @@ export default function LeaderboardPage() {
     </div>
   );
 }
-
