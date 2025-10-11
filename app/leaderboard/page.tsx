@@ -9,33 +9,48 @@ type GalleryItem = { id: string; title: string; url: string; x?: string; discord
 type CreatorRow = { user: string; uploads: number };
 
 type Scope = "daily" | "weekly" | "alltime";
-type Mode = "current" | "previous";
+type Mode = "current" | "previous" | "custom";
 
-/** ===== Segmented Buttons (compact & tidy) ===== */
-function Segmented<T extends string>({
-  value, options, onChange, className = ""
+/** ===== Tiny Dark Dropdown ===== */
+function DarkDropdown({
+  label,
+  items,
+  onSelect,
+  className = "",
 }: {
-  value: T;
-  options: { label: string; value: T }[];
-  onChange: (v: T) => void;
+  label: string;
+  items: { value: string; label: string }[];
+  onSelect: (v: string) => void;
   className?: string;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className={`inline-flex rounded-full bg-white/10 p-0.5 gap-1 ${className}`}>
-      {options.map(opt => {
-        const active = value === opt.value;
-        return (
-          <button
-            key={opt.value}
-            onClick={() => onChange(opt.value)}
-            className={`px-2.5 py-1 rounded-full text-xs sm:text-sm transition whitespace-nowrap
-              ${active ? "bg-white/20 text-white shadow" : "text-white/75 hover:text-white"}`}
-            aria-pressed={active}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
+    <div className={`relative ${className}`}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="px-4 py-1 rounded-full text-sm bg-gradient-to-r from-indigo-400/30 to-cyan-400/30 text-white shadow hover:brightness-110"
+      >
+        {label} <span className="opacity-80">▾</span>
+      </button>
+      {open && (
+        <div
+          className="absolute z-20 mt-1 min-w-[160px] rounded-lg border border-white/10 bg-black/85 backdrop-blur p-1 shadow-2xl"
+          onMouseLeave={() => setOpen(false)}
+        >
+          {items.map((it) => (
+            <button
+              key={it.value}
+              onClick={() => {
+                onSelect(it.value);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 rounded-md text-sm text-white/90 hover:bg-white/10"
+            >
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -73,7 +88,8 @@ function handleFromItem(it: GalleryItem): string {
 /** ===== Page ===== */
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("daily");
-  const [mode, setMode] = useState<Mode>("current");
+  const [mode, setMode] = useState<Mode>("current"); // current | previous | custom
+  const [customKey, setCustomKey] = useState<string | null>(null); // YYYY-MM-DD or YYYY-W##
   const [loading, setLoading] = useState(true);
   const [topArts, setTopArts] = useState<TopItem[]>([]);
   const [topCreators, setTopCreators] = useState<CreatorRow[]>([]);
@@ -90,7 +106,6 @@ export default function LeaderboardPage() {
   async function load() {
     setLoading(true);
     try {
-      // Load gallery items (for joining title/owner/image)
       const g = await fetch(`/api/gallery`, { cache: "no-store" })
         .then(res => res.json()).catch(() => ({}));
       setGallery(g?.items ?? []);
@@ -101,6 +116,12 @@ export default function LeaderboardPage() {
         setTopArts((j?.top_art || []).map((x: any) => ({ id: x.id, likes: x.likes, title: x.title, owner: x.owner })));
         setTopCreators((j?.top_creators || []).map((c: any) => ({ user: c.user, uploads: c.uploads })));
         setKeyDate(null);
+      } else if (mode === "custom" && customKey) {
+        const r = await fetch(`/api/history/by?scope=${scope}&key=${encodeURIComponent(customKey)}`, { cache: "no-store" });
+        const j = await r.json();
+        setTopArts(j?.top_art || []);
+        setTopCreators((j?.top_creators || []).map((c: any) => ({ user: c.user, uploads: c.uploads })));
+        setKeyDate(j?.key || customKey);
       } else {
         const r = await fetch(`/api/history/${scope}/${mode}`, { cache: "no-store" });
         const j = await r.json();
@@ -113,7 +134,7 @@ export default function LeaderboardPage() {
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope, mode]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope, mode, customKey]);
 
   useEffect(() => {
     function tick() {
@@ -132,7 +153,7 @@ export default function LeaderboardPage() {
 
   const byId = useMemo(() => new Map(gallery.map(it => [it.id, it])), [gallery]);
 
-  // Fallback: compute all-time uploads from gallery data (used when period creators is empty)
+  // Fallback all-time uploads (dipakai kalau API periode kosong)
   const uploadsAllTime = useMemo(() => {
     const m = new Map<string, number>();
     for (const it of gallery) {
@@ -156,7 +177,7 @@ export default function LeaderboardPage() {
   const headerTitle =
     scope === "alltime"
       ? "🏆 Top Art (All Time)"
-      : `🏆 Top Art (${scope} — ${mode})${keyDate ? ` · ${keyDate}` : ""}`;
+      : `🏆 Top Art (${scope}${mode === "custom" && keyDate ? ` — ${keyDate}` : ` — ${mode}`})`;
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
@@ -167,7 +188,7 @@ export default function LeaderboardPage() {
           <Link href="/submit" className="btn">＋ Submit</Link>
         </div>
 
-        {/* Controls (tidy, compact, wraps nicely) */}
+        {/* Controls */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="hidden sm:flex flex-col items-end mr-2">
             <span className="text-xs opacity-70">{resetLabel}</span>
@@ -176,24 +197,43 @@ export default function LeaderboardPage() {
             )}
           </div>
 
-          <Segmented
-            value={scope}
-            onChange={(v) => setScope(v as Scope)}
-            options={[
-              { label: "Daily", value: "daily" as Scope },
-              { label: "Weekly", value: "weekly" as Scope },
-              { label: "All Time", value: "alltime" as Scope },
+          {/* Scope dropdown */}
+          <DarkDropdown
+            label={scope === "daily" ? "Daily" : scope === "weekly" ? "Weekly" : "All Time"}
+            items={[
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+              { value: "alltime", label: "All Time" },
             ]}
+            onSelect={(v) => {
+              setScope(v as Scope);
+              if (v === "alltime") {
+                setMode("current");
+                setCustomKey(null);
+              }
+            }}
           />
 
+          {/* Mode dropdown (current/previous) */}
           {scope !== "alltime" && (
-            <Segmented
-              value={mode}
-              onChange={(v) => setMode(v as Mode)}
-              options={[
-                { label: "Current", value: "current" as Mode },
-                { label: "Previous", value: "previous" as Mode },
+            <DarkDropdown
+              label={mode === "current" ? "Current" : mode === "previous" ? "Previous" : "History"}
+              items={[
+                { value: "current", label: "Current" },
+                { value: "previous", label: "Previous" },
               ]}
+              onSelect={(v) => {
+                setMode(v as Mode);
+                setCustomKey(null);
+              }}
+            />
+          )}
+
+          {/* History chooser (dynamic) */}
+          {scope !== "alltime" && (
+            <HistoryChooser
+              scope={scope}
+              onPick={(k) => { setMode("custom"); setCustomKey(k); }}
             />
           )}
 
@@ -263,7 +303,7 @@ export default function LeaderboardPage() {
                               )}
                             </div>
                             <div className="mt-3 flex flex-wrap gap-2">
-                              <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
+                              <Link href={seeOnGallery} className="btn px-4 py-1 rounded-full text-sm">See on Gallery</Link>
                             </div>
                           </div>
                         </div>
@@ -278,7 +318,7 @@ export default function LeaderboardPage() {
           {/* ===== Top Creators (uploads) ===== */}
           <section>
             <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
-            {creatorsDisplay.length === 0 ? (
+            {(creatorsDisplay?.length ?? 0) === 0 ? (
               <div className="opacity-70 text-sm mt-3">No uploads counted.</div>
             ) : (
               <div className="space-y-3">
@@ -312,6 +352,62 @@ export default function LeaderboardPage() {
               </div>
             )}
           </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** ===== History chooser (loads period list lazily) ===== */
+function HistoryChooser({
+  scope,
+  onPick,
+  className = "",
+}: {
+  scope: "daily" | "weekly";
+  onPick: (key: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<{ value: string; label: string }[] | null>(null);
+
+  async function ensure() {
+    if (items) return;
+    const r = await fetch(`/api/history/list?scope=${scope}`, { cache: "no-store" });
+    const j = await r.json();
+    const arr: string[] = j?.items || [];
+    setItems(arr.map((k: string) => ({ value: k, label: k })));
+  }
+
+  return (
+    <div className={`relative ${className}`}>
+      <button
+        onClick={async () => {
+          await ensure();
+          setOpen((o) => !o);
+        }}
+        className="px-4 py-1 rounded-full text-sm bg-gradient-to-r from-indigo-400/30 to-cyan-400/30 text-white shadow hover:brightness-110"
+      >
+        History <span className="opacity-80">▾</span>
+      </button>
+      {open && (
+        <div
+          className="absolute z-20 mt-1 min-w-[200px] max-h-[300px] overflow-auto rounded-lg border border-white/10 bg-black/85 backdrop-blur p-1 shadow-2xl"
+          onMouseLeave={() => setOpen(false)}
+        >
+          {!items || items.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-white/60">No history yet.</div>
+          ) : (
+            items.map((it) => (
+              <button
+                key={it.value}
+                onClick={() => { onPick(it.value); setOpen(false); }}
+                className="w-full text-left px-3 py-2 rounded-md text-sm text-white/90 hover:bg-white/10"
+              >
+                {it.label}
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>

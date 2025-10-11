@@ -8,8 +8,6 @@ type BlobItem = { url: string; pathname?: string; key?: string };
 type ListResult = { blobs: BlobItem[]; cursor?: string | null };
 type ListFn = (opts: any) => Promise<ListResult>;
 
-// Load all submission metas via Vercel Blob.
-// We only need id/title/owner/imageUrl for joining likes.
 async function loadAllMetas(limit = 2000) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return [] as any[];
   const { list } = (await import("@vercel/blob")) as { list: ListFn };
@@ -51,24 +49,20 @@ async function loadAllMetas(limit = 2000) {
 
 export async function GET() {
   try {
-    // 1) Load all gallery metas
     const metas = await loadAllMetas();
     if (metas.length === 0) {
       return NextResponse.json({ scope: "alltime", top_art: [], top_creators: [], total_items: 0 });
     }
 
-    // 2) Batch read like counts for all known ids
     const ids = metas.map(m => `likes:count:${m.id}`);
     const counts = (await kv.mget(...ids)) as (number | null)[];
 
-    // 3) Build all-time Top Art from known items + counts
     const top_art = metas
       .map((m, i) => ({ id: m.id, likes: Number(counts[i] ?? 0), title: m.title, owner: m.owner, imageUrl: m.imageUrl }))
       .filter(row => row.likes > 0)
       .sort((a, b) => b.likes - a.likes)
       .slice(0, 100);
 
-    // 4) Build all-time Top Creators by uploads (simple count per owner)
     const byCreator: Record<string, number> = {};
     for (const m of metas) {
       const owner = String(m.owner || "").trim();
