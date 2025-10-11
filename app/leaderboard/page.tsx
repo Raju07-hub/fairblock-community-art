@@ -9,7 +9,6 @@ type GalleryItem = { id: string; title: string; url: string; x?: string; discord
 type CreatorRow = { user: string; uploads: number };
 
 type Scope = "daily" | "weekly" | "alltime";
-type Mode = "current" | "previous" | "custom";
 
 /** ===== Tiny Dark Dropdown ===== */
 function DarkDropdown({
@@ -34,7 +33,7 @@ function DarkDropdown({
       </button>
       {open && (
         <div
-          className="absolute z-20 mt-1 min-w-[160px] rounded-lg border border-white/10 bg-black/85 backdrop-blur p-1 shadow-2xl"
+          className="absolute z-20 mt-1 min-w-[180px] rounded-lg border border-white/10 bg-black/85 backdrop-blur p-1 shadow-2xl"
           onMouseLeave={() => setOpen(false)}
         >
           {items.map((it) => (
@@ -59,16 +58,19 @@ function DarkDropdown({
 const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
 
 function nextDailyResetUTC(now = new Date()): Date {
+  // reset harian jam 07:00 UTC+7 == 00:00 UTC
   const targetMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
   return new Date(targetMs);
 }
-function nextWeeklyResetUTC_Saturday(now = new Date()): Date {
-  const todayMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0);
-  const day = new Date(todayMidnight).getUTCDay();
+function nextWeeklyResetUTC_Saturday_7am_UTCplus7(now = new Date()): Date {
+  // 07:00 UTC+7 == 00:00 UTC; sama seperti di atas, tapi untuk Sabtu
+  const todayMidnightUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0);
+  const day = new Date(todayMidnightUTC).getUTCDay(); // 0..6 (Sun..Sat)
+  // cari sabtu berikutnya (UTC-midnight == 07:00 UTC+7)
   let daysAhead = (6 - day + 7) % 7;
-  let target = new Date(todayMidnight + daysAhead * DAY);
-  if (now.getTime() >= target.getTime()) target = new Date(target.getTime() + WEEK);
-  return target;
+  let targetUTC = todayMidnightUTC + daysAhead * DAY;
+  if (now.getTime() >= targetUTC) targetUTC += WEEK;
+  return new Date(targetUTC);
 }
 function formatDuration(ms: number): string {
   if (ms < 0) ms = 0;
@@ -85,17 +87,50 @@ function handleFromItem(it: GalleryItem): string {
   return d ? `@${d}` : "";
 }
 
+/** ===== Helpers for History Labels (UTC+7 presentation) ===== */
+const WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+function toDateFromYMD(key: string): Date {
+  // key: YYYY-MM-DD -> interpret as UTC midnight for that day
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1, 0, 0, 0));
+}
+function labelDaily(key: string): string {
+  const dt = toDateFromYMD(key);
+  // shift to UTC+7 only for label
+  const plus7 = new Date(dt.getTime() + 7 * 3600 * 1000);
+  const wd = WEEKDAYS[plus7.getUTCDay()];
+  return `${wd} — ${key} · 07:00 UTC+7`;
+}
+function mondayOfISOWeek(year: number, week: number): Date {
+  // Return Monday 00:00 UTC of ISO week
+  const simple = new Date(Date.UTC(year, 0, 4));
+  const dow = simple.getUTCDay() || 7;
+  simple.setUTCDate(simple.getUTCDate() + (week - 1) * 7 + (1 - dow));
+  return simple;
+}
+function labelWeekly(key: string): { label: string; range: { start: string; end: string } } {
+  // key: YYYY-W##
+  const [yStr, wStr] = key.split("-W");
+  const year = Number(yStr), week = Number(wStr);
+  const monUTC = mondayOfISOWeek(year, week); // Monday 00:00 UTC
+  const sunUTC = new Date(monUTC.getTime() + 6 * DAY);
+  const fmt = (d: Date) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  const start = fmt(monUTC);
+  const end = fmt(sunUTC);
+  const label = `Week ${key} — ${start} → ${end} · snapshot Sat 07:00 UTC+7`;
+  return { label, range: { start, end } };
+}
+
 /** ===== Page ===== */
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("daily");
-  const [mode, setMode] = useState<Mode>("current"); // current | previous | custom
-  const [customKey, setCustomKey] = useState<string | null>(null); // YYYY-MM-DD or YYYY-W##
   const [loading, setLoading] = useState(true);
   const [topArts, setTopArts] = useState<TopItem[]>([]);
   const [topCreators, setTopCreators] = useState<CreatorRow[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [countdown, setCountdown] = useState("--:--:--");
-  const [keyDate, setKeyDate] = useState<string | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null); // key when viewing history ("custom" implicitly)
 
   const btn = "btn px-4 py-1 rounded-full text-sm";
   const btnSm = "btn px-3 py-1 rounded-full text-xs";
@@ -115,31 +150,31 @@ export default function LeaderboardPage() {
         const j = await r.json();
         setTopArts((j?.top_art || []).map((x: any) => ({ id: x.id, likes: x.likes, title: x.title, owner: x.owner })));
         setTopCreators((j?.top_creators || []).map((c: any) => ({ user: c.user, uploads: c.uploads })));
-        setKeyDate(null);
-      } else if (mode === "custom" && customKey) {
-        const r = await fetch(`/api/history/by?scope=${scope}&key=${encodeURIComponent(customKey)}`, { cache: "no-store" });
+        setActiveKey(null);
+      } else if (activeKey) {
+        // view a specific historical key
+        const r = await fetch(`/api/history/by?scope=${scope}&key=${encodeURIComponent(activeKey)}`, { cache: "no-store" });
         const j = await r.json();
         setTopArts(j?.top_art || []);
         setTopCreators((j?.top_creators || []).map((c: any) => ({ user: c.user, uploads: c.uploads })));
-        setKeyDate(j?.key || customKey);
       } else {
-        const r = await fetch(`/api/history/${scope}/${mode}`, { cache: "no-store" });
+        // current period
+        const r = await fetch(`/api/history/${scope}/current`, { cache: "no-store" });
         const j = await r.json();
         setTopArts(j?.top_art || []);
         setTopCreators((j?.top_creators || []).map((c: any) => ({ user: c.user, uploads: c.uploads })));
-        setKeyDate(j?.keyDate || null);
       }
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope, mode, customKey]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope, activeKey]);
 
   useEffect(() => {
     function tick() {
       const now = new Date();
-      const target = scope === "weekly" ? nextWeeklyResetUTC_Saturday(now) : nextDailyResetUTC(now);
+      const target = scope === "weekly" ? nextWeeklyResetUTC_Saturday_7am_UTCplus7(now) : nextDailyResetUTC(now);
       setCountdown(formatDuration(target.getTime() - now.getTime()));
     }
     if (scope !== "alltime") {
@@ -169,15 +204,18 @@ export default function LeaderboardPage() {
 
   const resetLabel =
     scope === "weekly"
-      ? "Weekly reset: every Saturday at 00:00 UTC+7"
+      ? "Weekly reset: every Saturday at 07:00 UTC+7"
       : scope === "daily"
-      ? "Daily reset: every day at 00:00 UTC+7"
+      ? "Daily reset: every day at 07:00 UTC+7"
       : "All-Time";
 
-  const headerTitle =
-    scope === "alltime"
-      ? "🏆 Top Art (All Time)"
-      : `🏆 Top Art (${scope}${mode === "custom" && keyDate ? ` — ${keyDate}` : ` — ${mode}`})`;
+  const headerTitle = (() => {
+    if (scope === "alltime") return "🏆 Top Art (All Time)";
+    if (!activeKey) return `🏆 Top Art (${scope} — current)`;
+    if (scope === "daily") return `🏆 Top Art (daily — ${labelDaily(activeKey)})`;
+    const info = labelWeekly(activeKey);
+    return `🏆 Top Art (weekly — ${info.label})`;
+  })();
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
@@ -197,7 +235,7 @@ export default function LeaderboardPage() {
             )}
           </div>
 
-          {/* Scope dropdown */}
+          {/* Scope dropdown only */}
           <DarkDropdown
             label={scope === "daily" ? "Daily" : scope === "weekly" ? "Weekly" : "All Time"}
             items={[
@@ -207,33 +245,16 @@ export default function LeaderboardPage() {
             ]}
             onSelect={(v) => {
               setScope(v as Scope);
-              if (v === "alltime") {
-                setMode("current");
-                setCustomKey(null);
-              }
+              setActiveKey(null); // reset history when switching scope
             }}
           />
 
-          {/* Mode dropdown (current/previous) */}
-          {scope !== "alltime" && (
-            <DarkDropdown
-              label={mode === "current" ? "Current" : mode === "previous" ? "Previous" : "History"}
-              items={[
-                { value: "current", label: "Current" },
-                { value: "previous", label: "Previous" },
-              ]}
-              onSelect={(v) => {
-                setMode(v as Mode);
-                setCustomKey(null);
-              }}
-            />
-          )}
-
-          {/* History chooser (dynamic) */}
+          {/* History chooser */}
           {scope !== "alltime" && (
             <HistoryChooser
               scope={scope}
-              onPick={(k) => { setMode("custom"); setCustomKey(k); }}
+              onPick={(k) => setActiveKey(k)}
+              formatLabel={(k) => (scope === "daily" ? labelDaily(k) : labelWeekly(k).label)}
             />
           )}
 
@@ -362,11 +383,11 @@ export default function LeaderboardPage() {
 function HistoryChooser({
   scope,
   onPick,
-  className = "",
+  formatLabel,
 }: {
   scope: "daily" | "weekly";
   onPick: (key: string) => void;
-  className?: string;
+  formatLabel: (key: string) => string;
 }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<{ value: string; label: string }[] | null>(null);
@@ -376,11 +397,11 @@ function HistoryChooser({
     const r = await fetch(`/api/history/list?scope=${scope}`, { cache: "no-store" });
     const j = await r.json();
     const arr: string[] = j?.items || [];
-    setItems(arr.map((k: string) => ({ value: k, label: k })));
+    setItems(arr.map((k: string) => ({ value: k, label: formatLabel(k) })));
   }
 
   return (
-    <div className={`relative ${className}`}>
+    <div className="relative">
       <button
         onClick={async () => {
           await ensure();
@@ -392,7 +413,7 @@ function HistoryChooser({
       </button>
       {open && (
         <div
-          className="absolute z-20 mt-1 min-w-[200px] max-h-[300px] overflow-auto rounded-lg border border-white/10 bg-black/85 backdrop-blur p-1 shadow-2xl"
+          className="absolute z-20 mt-1 min-w-[280px] max-h-[320px] overflow-auto rounded-lg border border-white/10 bg-black/85 backdrop-blur p-1 shadow-2xl"
           onMouseLeave={() => setOpen(false)}
         >
           {!items || items.length === 0 ? (
