@@ -7,9 +7,10 @@ type TopItem = {
   id: string;
   likes?: number;
   title?: string;
-  owner?: string;
-  postUrl?: string; // optional: open original X post
-  url?: string;     // optional preview image if API provides it
+  owner?: string;   // X handle (e.g. "@name")
+  discord?: string; // NEW: discord handle (e.g. "@user#1234" → we store normalized "@user")
+  postUrl?: string; // NEW: X/Twitter post link
+  url?: string;     // optional preview
 };
 type Creator = { user: string; uploads: number };
 type Scope = "daily" | "weekly" | "alltime";
@@ -44,6 +45,8 @@ export default function LeaderboardPage() {
   const [topCreators, setTopCreators] = useState<Creator[]>([]);
   const [countdown, setCountdown] = useState("--:--:--");
 
+  const pill = (active: boolean) =>
+    `btn px-4 py-1 rounded-full text-sm ${active ? "bg-[#3aaefc]/30" : "bg-white/10"}`;
   const btn = "btn px-4 py-1 rounded-full text-sm";
   const badge = "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
   const heading = "text-2xl font-bold mb-3 text-[#3aaefc]";
@@ -51,6 +54,7 @@ export default function LeaderboardPage() {
   async function load() {
     setLoading(true);
     try {
+      // /api/leaderboard/:scope harus mengembalikan: { top_art: TopItem[], top_creators: Creator[] }
       const r = await fetch(`/api/leaderboard/${scope}`, { cache: "no-store" });
       const j = await r.json();
       setTopArts(j?.top_art || []);
@@ -85,13 +89,10 @@ export default function LeaderboardPage() {
       : "All-Time";
 
   const headerTitle =
-    scope === "alltime"
-      ? "🏆 Top Art (All Time)"
-      : `🏆 Top Art (${scope.toUpperCase()})`;
+    scope === "alltime" ? "🏆 Top Art (All Time)" : `🏆 Top Art (${scope.toUpperCase()})`;
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
-      {/* toolbar */}
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
@@ -105,32 +106,14 @@ export default function LeaderboardPage() {
             <span className="text-sm font-semibold text-[#3aaefc]">Resets in {countdown}</span>
           )}
           <div className="flex gap-2">
-            <button
-              className={`${btn} ${scope === "daily" ? "bg-[#3aaefc]/30" : "bg-white/10"}`}
-              onClick={() => setScope("daily")}
-            >
-              Daily
-            </button>
-            <button
-              className={`${btn} ${scope === "weekly" ? "bg-[#3aaefc]/30" : "bg-white/10"}`}
-              onClick={() => setScope("weekly")}
-            >
-              Weekly
-            </button>
-            <button
-              className={`${btn} ${scope === "alltime" ? "bg-[#3aaefc]/30" : "bg-white/10"}`}
-              onClick={() => setScope("alltime")}
-            >
-              All Time
-            </button>
+            <button className={pill(scope === "daily")} onClick={() => setScope("daily")}>Daily</button>
+            <button className={pill(scope === "weekly")} onClick={() => setScope("weekly")}>Weekly</button>
+            <button className={pill(scope === "alltime")} onClick={() => setScope("alltime")}>All Time</button>
           </div>
-          <button onClick={load} className={btn} disabled={loading}>
-            ↻ {loading ? "Refreshing…" : "Refresh"}
-          </button>
+          <button onClick={load} className={btn} disabled={loading}>↻ {loading ? "Refreshing…" : "Refresh"}</button>
         </div>
       </div>
 
-      {/* content */}
       {loading ? (
         <p className="opacity-70">Loading…</p>
       ) : (
@@ -140,51 +123,47 @@ export default function LeaderboardPage() {
             <h2 className={heading}>{headerTitle}</h2>
             <div className="space-y-3">
               {topArts.slice(0, 10).map((t, idx) => {
-                const name = t.title ?? "Untitled";
-                const owner = t.owner ?? "";
-                const handleNoAt = owner.replace(/^@/, "");
-                const xUrl = handleNoAt ? `https://x.com/${handleNoAt}` : "";
-                const permalink = `/gallery?select=${encodeURIComponent(t.id)}`;
+                const title = t.title ?? "Untitled";
+                const xHandle = t.owner || "";     // from API
+                const discord = t.discord || "";   // from API
+                const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
+                const xProfile = xHandle ? `https://x.com/${xHandle.replace(/^@/,"")}` : "";
+
                 return (
                   <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
                     <div className="flex items-center gap-4 min-w-0">
                       <span className="w-7 text-center opacity-70">{idx + 1}.</span>
-
                       {t.url && (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={t.url}
-                          alt={name}
+                          alt={title}
                           className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl object-cover bg-white/10 shrink-0 shadow-md"
                           loading="lazy"
                           decoding="async"
                         />
                       )}
-
                       <div className="min-w-0">
-                        <div className="font-medium truncate text-base">
-                          {name}{" "}
-                          {owner && (
-                            <>
-                              <span className="opacity-70">by</span>{" "}
-                              <a
-                                href={xUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="underline text-[#4af2ff]"
-                              >
-                                {owner}
-                              </a>
-                            </>
+                        <div className="font-medium truncate text-base">{title}</div>
+
+                        <div className="mt-1 text-sm opacity-80 space-x-2">
+                          {xHandle && (
+                            <a className="underline hover:opacity-90" href={xProfile} target="_blank" rel="noopener noreferrer">
+                              {xHandle}
+                            </a>
+                          )}
+                          {discord && (
+                            <span className="opacity-70">· {discord}</span>
                           )}
                         </div>
+
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <Link href={permalink} className={btn}>Permalink</Link>
-                          <Link href={permalink} className={btn}>See on Gallery</Link>
+                          <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
                           {t.postUrl && (
-                            <a href={t.postUrl} target="_blank" rel="noreferrer" className={btn}>
-                              Open Art Post
-                            </a>
+                            <a href={t.postUrl} target="_blank" rel="noreferrer" className={btn}>Open Art Post</a>
+                          )}
+                          {xHandle && (
+                            <a href={xProfile} target="_blank" rel="noreferrer" className={btn}>Open X Profile</a>
                           )}
                         </div>
                       </div>
@@ -193,11 +172,6 @@ export default function LeaderboardPage() {
                   </div>
                 );
               })}
-              {topArts.length === 0 && (
-                <p className="opacity-70">
-                  No data for this period yet. Try giving a <span className="text-pink-400">❤</span> in the Gallery, then press Refresh.
-                </p>
-              )}
             </div>
           </section>
 
@@ -220,12 +194,8 @@ export default function LeaderboardPage() {
                           <div className="font-medium truncate text-[15px]">{handle}</div>
                           <div className="text-xs opacity-60">Uploads: {c.uploads}</div>
                           <div className="mt-2 flex flex-wrap gap-2">
-                            <Link href={galleryLink} className="btn px-3 py-1 rounded-full text-xs">
-                              Search on Gallery
-                            </Link>
-                            <a href={xUrl} target="_blank" rel="noreferrer" className="btn px-3 py-1 rounded-full text-xs">
-                              Open X Profile
-                            </a>
+                            <Link href={galleryLink} className="btn px-3 py-1 rounded-full text-xs">Search on Gallery</Link>
+                            <a href={xUrl} target="_blank" rel="noreferrer" className="btn px-3 py-1 rounded-full text-xs">Open X Profile</a>
                           </div>
                         </div>
                       </div>
@@ -235,9 +205,6 @@ export default function LeaderboardPage() {
                     </div>
                   );
                 })}
-              {topCreators.length === 0 && (
-                <p className="opacity-70">No uploads counted for this period.</p>
-              )}
             </div>
           </section>
         </div>

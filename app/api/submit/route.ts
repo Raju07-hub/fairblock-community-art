@@ -14,6 +14,21 @@ function extFromMime(m: string) {
   return "bin";
 }
 
+function normHandle(v: string) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const noAt = s.replace(/^@/, "");
+  return `@${noAt}`;
+}
+
+function normPostUrl(u: string) {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  // biarkan apa adanya; validasi ringan
+  if (!/^https?:\/\//i.test(s)) return "";
+  return s;
+}
+
 export async function POST(req: Request) {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -25,9 +40,9 @@ export async function POST(req: Request) {
 
     const form = await req.formData();
     const title = String(form.get("title") || "").trim();
-    const x = String(form.get("x") || "").trim();
-    const discord = String(form.get("discord") || "").trim();
-    const postUrl = String(form.get("postUrl") || "").trim(); // NEW
+    const x = normHandle(String(form.get("x") || ""));
+    const discord = normHandle(String(form.get("discord") || ""));
+    const postUrl = normPostUrl(String(form.get("postUrl") || "")); // ← NEW
     const file = form.get("file") as File | null;
 
     if (!title) {
@@ -58,7 +73,7 @@ export async function POST(req: Request) {
     const { put } = await import("@vercel/blob");
     const bytes = Buffer.from(await file.arrayBuffer());
 
-    // 1) upload gambar
+    // 1) upload image
     const imageKey = `fairblock/img/${id}.${ext}`;
     const image = await put(imageKey, bytes, {
       access: "public",
@@ -66,15 +81,15 @@ export async function POST(req: Request) {
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
 
-    // 2) simpan metadata (pakai imageUrl + postUrl)
+    // 2) save meta
     const metaKey = `fairblock/meta/${id}.json`;
     const meta = {
       id,
       title,
-      x,
-      discord,
-      postUrl: postUrl || undefined,       // NEW
-      imageUrl: image.url,                 // NEW (ganti dari url)
+      x,         // "@user"
+      discord,   // "@discordUser"
+      postUrl,   // ← NEW
+      imageUrl: image.url,    // gunakan imageUrl (baru)
       createdAt,
       ownerTokenHash,
     };
@@ -91,7 +106,7 @@ export async function POST(req: Request) {
       url: image.url,
       metaUrl: metaBlob.url,
       ownerTokenHash,
-      deleteToken, // simpan di localStorage sisi klien
+      deleteToken,
     });
   } catch (err: any) {
     return NextResponse.json(

@@ -7,6 +7,13 @@ type BlobItem = { url: string; pathname?: string; key?: string };
 type ListResult = { blobs: BlobItem[]; cursor?: string | null };
 type ListFn = (opts: any) => Promise<ListResult>;
 
+function normHandle(v?: string) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const noAt = s.replace(/^@/, "");
+  return `@${noAt}`;
+}
+
 export async function GET() {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -23,7 +30,7 @@ export async function GET() {
     const { blobs } = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
       prefix: "fairblock/meta/",
-      limit: 200,
+      limit: 100,
     });
 
     const items = await Promise.all(
@@ -33,19 +40,18 @@ export async function GET() {
           if (!res.ok) return null;
           const meta = await res.json();
 
-          const imageUrl: string | undefined = meta.imageUrl || meta.url; // fallback lama
-
+          const imageUrl: string | undefined = meta.imageUrl || meta.url;
           if (!meta?.id || !meta?.title || !imageUrl) return null;
 
           return {
             id: String(meta.id),
             title: String(meta.title),
-            x: meta.x ? String(meta.x) : undefined,
-            discord: meta.discord ? String(meta.discord) : undefined,
+            x: normHandle(meta.x),
+            discord: normHandle(meta.discord),
+            postUrl: meta.postUrl ? String(meta.postUrl) : "",  // ← NEW
             url: imageUrl,
-            postUrl: meta.postUrl ? String(meta.postUrl) : undefined, // NEW
             createdAt: String(meta.createdAt || ""),
-            metaUrl: b.url, // penting utk edit/delete
+            metaUrl: b.url,
           };
         } catch {
           return null;
