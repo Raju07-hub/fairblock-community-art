@@ -44,7 +44,7 @@ export default function EditArtworkPage() {
     (async () => {
       setLoading(true);
       try {
-        const j = await fetch("/api/gallery", { cache: "no-store" }).then(r => r.json());
+        const j = await fetch("/api/gallery", { cache: "no-store" }).then((r) => r.json());
         const list: Artwork[] = j?.items || [];
         const found = list.find((a) => a.id === id) || null;
         if (!found) {
@@ -65,6 +65,7 @@ export default function EditArtworkPage() {
 
   async function onSave() {
     if (!item) return;
+
     const token = getOwnerTokenFor(item.id);
     if (!token) {
       alert("Delete/Edit token not found. Gunakan browser yg sama saat submit.");
@@ -74,6 +75,7 @@ export default function EditArtworkPage() {
       alert("Missing metaUrl on this artwork.");
       return;
     }
+
     setSaving(true);
     try {
       const patch = {
@@ -82,15 +84,29 @@ export default function EditArtworkPage() {
         discord: discord.trim(),
         postUrl: postUrl.trim(),
       };
-      const res = await fetch(`/api/art/${item.id}`, {
+
+      const resp = await fetch(`/api/art/${item.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token, metaUrl: item.metaUrl, patch }),
-      }).then(r => r.json());
+      });
 
-      if (!res?.success) {
-        throw new Error(res?.error || "Save failed");
+      // --- PARSE RESPON AMAN (204 / non-JSON) ---
+      let data: any = null;
+      const ct = resp.headers.get("content-type") || "";
+      if (resp.status === 204) {
+        data = { success: true };
+      } else if (ct.includes("application/json")) {
+        data = await resp.json();
+      } else {
+        const text = await resp.text().catch(() => "");
+        data = resp.ok ? { success: true } : { success: false, error: text || resp.statusText };
       }
+
+      if (!resp.ok || data?.success === false) {
+        throw new Error(data?.error || `${resp.status} ${resp.statusText}`);
+      }
+
       alert("Saved.");
       router.push("/gallery");
     } catch (e: any) {
@@ -104,8 +120,12 @@ export default function EditArtworkPage() {
     return (
       <div className="max-w-2xl mx-auto px-5 sm:px-6 py-10">
         <div className="mb-5 flex gap-3">
-          <button className="btn" onClick={() => router.back()}>⬅ Back</button>
-          <Link className="btn" href="/gallery">🏞️ Gallery</Link>
+          <button className="btn" onClick={() => router.back()}>
+            ⬅ Back
+          </button>
+          <Link className="btn" href="/gallery">
+            🏞️ Gallery
+          </Link>
         </div>
         <p className="opacity-70">Loading…</p>
       </div>
@@ -118,8 +138,12 @@ export default function EditArtworkPage() {
     <div className="max-w-2xl mx-auto px-5 sm:px-6 py-10">
       {/* Back buttons */}
       <div className="mb-5 flex gap-3">
-        <button className="btn" onClick={() => router.back()}>⬅ Back</button>
-        <Link className="btn" href="/gallery">🏞️ Gallery</Link>
+        <button className="btn" onClick={() => router.back()}>
+          ⬅ Back
+        </button>
+        <Link className="btn" href="/gallery">
+          🏞️ Gallery
+        </Link>
       </div>
 
       <h1 className="text-2xl font-bold mb-6">Edit Artwork</h1>
@@ -171,14 +195,12 @@ export default function EditArtworkPage() {
         </label>
 
         <div className="pt-2 flex gap-3">
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="btn"
-          >
+          <button onClick={onSave} disabled={saving} className="btn">
             {saving ? "Saving…" : "Save Changes"}
           </button>
-          <button className="btn" onClick={() => router.back()}>Cancel</button>
+          <button className="btn" onClick={() => router.back()}>
+            Cancel
+          </button>
         </div>
       </div>
     </div>
