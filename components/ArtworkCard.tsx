@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Heart } from "lucide-react";
+import { Heart, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 type Artwork = {
   id: string;
@@ -23,8 +24,8 @@ export default function ArtworkCard({
   const [liked, setLiked] = useState(!!item.liked);
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [busy, setBusy] = useState(false);
+  const router = useRouter();
 
-  // keep in sync with parent
   useEffect(() => {
     setLiked(!!item.liked);
     setLikes(Number(item.likes || 0));
@@ -33,16 +34,12 @@ export default function ArtworkCard({
   async function handleLike() {
     if (busy) return;
     setBusy(true);
-
     const next = !liked;
-    // optimistic
     setLiked(next);
     setLikes((n) => Math.max(0, n + (next ? 1 : -1)));
-
     try {
       await onLike(item.id);
     } catch {
-      // rollback
       setLiked(!next);
       setLikes((n) => Math.max(0, n + (next ? -1 : 1)));
       alert("Failed to like.");
@@ -52,10 +49,12 @@ export default function ArtworkCard({
   }
 
   const xHandle = item.x ? item.x.replace(/^@/, "") : null;
+  const uploaderQuery = xHandle ? `@${xHandle}` : "";
 
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
-      <div className="w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
+      {/* IMAGE WRAPPER */}
+      <div className="relative w-full h-56 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden">
         <img
           src={item.url}
           alt={item.title}
@@ -68,6 +67,26 @@ export default function ArtworkCard({
               );
           }}
         />
+
+        {/* ❤️ LIKE BADGE — overlay kanan-atas (area yang kamu coret) */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleLike();
+          }}
+          disabled={busy}
+          aria-pressed={liked}
+          title={liked ? "Unlike" : "Like"}
+          className={`absolute top-2 right-2 select-none inline-flex items-center gap-1 rounded-full px-3 py-1.5 shadow-md backdrop-blur
+            ${liked ? "bg-white text-red-600" : "bg-black/50 text-white hover:bg-black/60"}`}
+        >
+          <Heart
+            className={`w-5 h-5 ${
+              liked ? "fill-current text-red-600" : "text-red-500"
+            }`}
+          />
+          <span className="text-sm font-medium">{likes}</span>
+        </button>
       </div>
 
       <h3 className="mt-3 font-semibold truncate">{item.title}</h3>
@@ -88,7 +107,7 @@ export default function ArtworkCard({
             <button
               onClick={async () => {
                 const handle = item.discord;
-                if (!handle) return; // type guard
+                if (!handle) return;
                 try {
                   await navigator.clipboard.writeText(handle);
                   alert("Discord handle copied.");
@@ -100,18 +119,21 @@ export default function ArtworkCard({
               Copy Discord
             </button>
           )}
-        </div>
 
-        <button
-          onClick={handleLike}
-          disabled={busy}
-          aria-pressed={liked}
-          className={`badge-like-big ${liked ? "liked" : ""}`}
-          title={liked ? "Unlike" : "Like"}
-        >
-          <Heart className={`w-5 h-5 ${liked ? "fill-current" : ""}`} />
-          <span className="text-sm">{likes}</span>
-        </button>
+          {/* 🔎 SEARCH ON GALLERY -> /gallery?search=@username */}
+          {xHandle && (
+            <button
+              className="btn-ghost text-sm px-3 py-1 inline-flex items-center gap-1"
+              title="Search this uploader on Gallery"
+              onClick={() => router.push(`/gallery?search=${encodeURIComponent(uploaderQuery)}`)}
+            >
+              <Search className="w-4 h-4" />
+              Search on Gallery
+            </button>
+          )}
+        </div>
+        {/* (badge like dipindah ke overlay atas, jadi area kanan-bawah dibiarkan kosong / bisa isi lain) */}
+        <div />
       </div>
     </div>
   );
