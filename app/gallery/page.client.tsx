@@ -34,35 +34,27 @@ function getOwnerTokenFor(id: string): string | null {
   }
 }
 
-// Clipboard helper: kuat + fallback
 async function copyTextForce(text: string) {
   if (!text) throw new Error("empty");
   try {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      if (!ok) throw new Error("execCommand failed");
-      return true;
-    } catch {
-      return false;
-    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
   }
 }
 
 export default function GalleryClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
-
   const initialSearch =
     (searchParams.get("search") || searchParams.get("q") || "").trim();
 
@@ -72,7 +64,6 @@ export default function GalleryClient() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // sinkronkan state query setiap URL ?search= berubah
   useEffect(() => {
     const incoming =
       (searchParams.get("search") || searchParams.get("q") || "").trim();
@@ -104,7 +95,6 @@ export default function GalleryClient() {
     load();
   }, []);
 
-  // sinkronkan input -> URL (?search=)
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const curr = sp.get("search") || "";
@@ -123,7 +113,6 @@ export default function GalleryClient() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: it.id, author }),
     }).then((r) => r.json());
-
     if (j?.success) {
       setLikes((prev) => ({
         ...prev,
@@ -134,10 +123,7 @@ export default function GalleryClient() {
 
   async function onDelete(it: GalleryItem) {
     const token = getOwnerTokenFor(it.id);
-    if (!token)
-      return alert(
-        "Delete token not found. Use the same browser you used to submit."
-      );
+    if (!token) return alert("Delete token not found.");
     if (!confirm("Delete this artwork?")) return;
 
     const j = await fetch(`/api/art/${it.id}`, {
@@ -146,21 +132,18 @@ export default function GalleryClient() {
       body: JSON.stringify({ token, metaUrl: it.metaUrl }),
     }).then((r) => r.json());
 
-    if (j?.success) {
+    if (j?.success)
       setItems((prev) => prev.filter((x) => x.id !== it.id));
-    } else {
-      alert(j?.error || "Delete failed");
-    }
+    else alert(j?.error || "Delete failed");
   }
 
   const filtered = useMemo(() => {
     let list = items;
     if (query.trim()) {
       const q = query.trim().toLowerCase();
-      list = list.filter((it) => {
-        const h = [it.title, it.x, it.discord].join(" ").toLowerCase();
-        return h.includes(q);
-      });
+      list = list.filter((it) =>
+        [it.title, it.x, it.discord].join(" ").toLowerCase().includes(q)
+      );
     }
     if (onlyMine) list = list.filter((it) => !!getOwnerTokenFor(it.id));
     return list;
@@ -170,15 +153,9 @@ export default function GalleryClient() {
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
-          <Link href="/" className="btn">
-            ⬅ Back Home
-          </Link>
-          <Link href="/submit" className="btn">
-            ＋ Submit Art
-          </Link>
-          <Link href="/leaderboard" className="btn">
-            🏆 Leaderboard
-          </Link>
+          <Link href="/" className="btn">⬅ Back Home</Link>
+          <Link href="/submit" className="btn">＋ Submit Art</Link>
+          <Link href="/leaderboard" className="btn">🏆 Leaderboard</Link>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <input
@@ -223,140 +200,125 @@ export default function GalleryClient() {
             const isOwner = !!getOwnerTokenFor(it.id);
 
             return (
-              // gradient border premium
               <div
                 key={it.id}
-                className="rounded-2xl p-[1px] bg-gradient-to-br from-cyan-400/40 via-sky-300/30 to-blue-500/40 shadow-lg hover:shadow-xl transition-shadow"
+                className="group relative rounded-2xl overflow-hidden bg-gradient-to-br from-white/10 to-white/5 border border-white/10 shadow-[0_0_30px_rgba(0,0,0,0.25)] hover:shadow-[0_0_40px_rgba(0,0,0,0.35)] transition-all duration-500"
               >
-                <div className="bg-white/5 rounded-2xl overflow-hidden backdrop-blur-md">
-                  {/* Gambar (Next/Image) + LIKE overlay */}
-                  <div className="relative group">
-                    <div className="relative w-full aspect-[4/3]">
-                      <Image
-                        src={it.url}
-                        alt={it.title}
-                        fill
-                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                        className="object-cover will-change-transform transition-transform duration-500 group-hover:scale-[1.02]"
-                        priority={false}
-                        // jika perlu non-optimize, aktifkan: unoptimized
-                      />
-                      {/* overlay subtle */}
-                      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(transparent,rgba(0,0,0,0.25))] opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
+                {/* Image section */}
+                <div className="relative w-full aspect-[4/3] overflow-hidden">
+                  <Image
+                    src={it.url}
+                    alt={it.title}
+                    fill
+                    unoptimized
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                    className="object-cover opacity-0 animate-fadeIn group-hover:scale-[1.03] transition-transform duration-700"
+                  />
+                  {/* ❤️ like */}
+                  <button
+                    onClick={() => toggleLike(it)}
+                    aria-pressed={like.liked}
+                    title={like.liked ? "Unlike" : "Like"}
+                    className={`absolute top-2 right-2 select-none inline-flex items-center gap-1 rounded-full px-3 py-1.5 shadow-md backdrop-blur-md transition-all ${
+                      like.liked
+                        ? "bg-white text-red-600"
+                        : "bg-black/60 text-white hover:bg-black/80"
+                    }`}
+                  >
+                    <Heart
+                      className={`w-5 h-5 ${
+                        like.liked
+                          ? "fill-current text-red-600"
+                          : "text-red-500"
+                      }`}
+                    />
+                    <span className="text-sm font-medium">{like.count}</span>
+                  </button>
+                </div>
 
-                    {/* ❤️ like merah di pojok kanan-atas */}
+                {/* Info */}
+                <div className="p-4">
+                  <div className="font-semibold truncate text-white">
+                    {it.title}
+                  </div>
+                  <div className="text-sm text-white/70 mt-1">
+                    {xHandle && (
+                      <a
+                        href={xUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline text-sky-300 hover:text-sky-200"
+                      >
+                        {xHandle}
+                      </a>
+                    )}
+                    {discordName && (
+                      <>
+                        <span> · </span>
+                        <span>{discordName}</span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Buttons */}
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <button
-                      onClick={() => toggleLike(it)}
-                      aria-pressed={like.liked}
-                      title={like.liked ? "Unlike" : "Like"}
-                      className={`absolute top-2 right-2 select-none inline-flex items-center gap-1 rounded-full px-3 py-1.5 shadow-md backdrop-blur
-                        ${
-                          like.liked
-                            ? "bg-white text-red-600"
-                            : "bg-black/50 text-white hover:bg-black/60"
-                        }`}
+                      className="btn px-3 py-1 text-xs bg-gradient-to-r from-sky-400/80 to-cyan-300/80 text-black font-semibold"
+                      onClick={() => {
+                        const target = queryKey || "";
+                        setQuery(target);
+                        const sp = new URLSearchParams(
+                          window.location.search
+                        );
+                        if (target) sp.set("search", target);
+                        else sp.delete("search");
+                        sp.delete("q");
+                        router.replace(`/gallery?${sp.toString()}`);
+                      }}
                     >
-                      <Heart
-                        className={`w-5 h-5 ${
-                          like.liked
-                            ? "fill-current text-red-600"
-                            : "text-red-500"
-                        }`}
-                      />
-                      <span className="text-sm font-medium">{like.count}</span>
+                      Search on Gallery
+                    </button>
+
+                    {openPost && (
+                      <a
+                        href={openPost}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn px-3 py-1 text-xs bg-white/20 hover:bg-white/30"
+                      >
+                        Open Art Post
+                      </a>
+                    )}
+
+                    <button
+                      className="btn px-3 py-1 text-xs bg-white/20 hover:bg-white/30"
+                      onClick={async () => {
+                        const text = discordName || xHandle || "";
+                        if (!text) return alert("No Discord or X handle.");
+                        const ok = await copyTextForce(text);
+                        alert(ok ? "Copied!" : "Copy failed.");
+                      }}
+                    >
+                      Copy Discord
                     </button>
                   </div>
 
-                  <div className="p-4">
-                    <div className="font-semibold truncate">{it.title}</div>
-                    <div className="text-sm text-white/70 mt-1">
-                      {xHandle && (
-                        <a
-                          href={xUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline text-sky-300 hover:text-sky-200 transition-colors"
-                        >
-                          {xHandle}
-                        </a>
-                      )}
-                      {discordName && (
-                        <>
-                          <span> · </span>
-                          <span>{discordName}</span>
-                        </>
-                      )}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {/* Search on Gallery (set state + URL) */}
-                      <button
-                        className="btn px-3 py-1 text-xs"
-                        onClick={() => {
-                          const target = queryKey || "";
-                          setQuery(target);
-                          const sp = new URLSearchParams(
-                            window.location.search
-                          );
-                          if (target) sp.set("search", target);
-                          else sp.delete("search");
-                          sp.delete("q");
-                          router.replace(`/gallery?${sp.toString()}`);
-                        }}
+                  {isOwner && (
+                    <div className="mt-3 flex gap-2">
+                      <Link
+                        href={`/edit/${it.id}`}
+                        className="btn px-3 py-1 text-xs bg-white/10"
                       >
-                        Search on Gallery
-                      </button>
-
-                      {openPost && (
-                        <a
-                          href={openPost}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn px-3 py-1 text-xs"
-                        >
-                          Open Art Post
-                        </a>
-                      )}
-
-                      {/* ✅ Copy Discord diperkuat */}
+                        ✏️ Edit
+                      </Link>
                       <button
-                        className="btn px-3 py-1 text-xs"
-                        onClick={async () => {
-                          const text =
-                            discordName ||
-                            xHandle || // fallback: x handle jika discord kosong
-                            "";
-                          if (!text) {
-                            alert("No Discord or X handle to copy.");
-                            return;
-                          }
-                          const ok = await copyTextForce(text);
-                          if (ok) alert("Copied!");
-                          else alert("Copy failed. Please copy manually.");
-                        }}
+                        onClick={() => onDelete(it)}
+                        className="btn px-3 py-1 text-xs bg-red-500/30"
                       >
-                        Copy Discord
+                        🗑 Delete
                       </button>
                     </div>
-
-                    {isOwner && (
-                      <div className="mt-3 flex gap-2">
-                        <Link
-                          href={`/edit/${it.id}`}
-                          className="btn px-3 py-1 text-xs bg-white/10"
-                        >
-                          ✏️ Edit
-                        </Link>
-                        <button
-                          onClick={() => onDelete(it)}
-                          className="btn px-3 py-1 text-xs bg-red-500/30"
-                        >
-                          🗑 Delete
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
               </div>
             );
