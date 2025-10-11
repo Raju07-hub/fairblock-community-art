@@ -1,4 +1,3 @@
-// app/api/gallery/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -10,7 +9,6 @@ type ListFn = (opts: any) => Promise<ListResult>;
 
 export async function GET() {
   try {
-    // Jika belum set token, kembalikan list kosong (aman di prod)
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json({
         success: true,
@@ -22,7 +20,6 @@ export async function GET() {
 
     const { list } = (await import("@vercel/blob")) as { list: ListFn };
 
-    // Ambil maksimal 100 metadata terbaru (bisa ditambah pagination nanti)
     const { blobs } = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
       prefix: "fairblock/meta/",
@@ -36,9 +33,7 @@ export async function GET() {
           if (!res.ok) return null;
           const meta = await res.json();
 
-          // NOTE: submit route baru pakai `imageUrl`. Fallback ke `url` kalau meta lama.
           const imageUrl: string | undefined = meta.imageUrl || meta.url;
-
           if (!meta?.id || !meta?.title || !imageUrl) return null;
 
           return {
@@ -46,9 +41,10 @@ export async function GET() {
             title: String(meta.title),
             x: meta.x ? String(meta.x) : undefined,
             discord: meta.discord ? String(meta.discord) : undefined,
-            url: imageUrl,          // <- dipakai GalleryPage
+            url: imageUrl,
             createdAt: String(meta.createdAt || ""),
-            metaUrl: b.url,         // <- penting untuk delete admin/owner
+            metaUrl: b.url,
+            postUrl: meta.postUrl ? String(meta.postUrl) : undefined, // NEW
           };
         } catch {
           return null;
