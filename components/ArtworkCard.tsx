@@ -1,7 +1,8 @@
+// /components/ArtworkCard.tsx
 "use client";
 
 import { useEffect, useState } from "react";
-import { Heart, Search } from "lucide-react";
+import { Heart, Search, Trash2, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 type Artwork = {
@@ -14,16 +15,30 @@ type Artwork = {
   liked?: boolean;
 };
 
+function getOwnerTokenFor(id: string): string | null {
+  try {
+    const raw = localStorage.getItem("fairblock:tokens");
+    if (!raw) return null;
+    const map = JSON.parse(raw || "{}");
+    return map?.[id] || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function ArtworkCard({
   item,
   onLike,
+  onDeleted, // optional: biar parent bisa langsung remove dari list
 }: {
   item: Artwork;
   onLike: (id: string) => Promise<void>;
+  onDeleted?: (id: string) => void;
 }) {
   const [liked, setLiked] = useState(!!item.liked);
   const [likes, setLikes] = useState(Number(item.likes || 0));
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -48,8 +63,33 @@ export default function ArtworkCard({
     }
   }
 
+  async function handleDelete() {
+    if (deleting) return;
+    if (!confirm("Delete this artwork?")) return;
+
+    const token = getOwnerTokenFor(item.id) || "";
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/delete?id=${encodeURIComponent(item.id)}`, {
+        method: "POST",
+        headers: { "x-owner-token": token },
+      });
+      const data = await res.json();
+      if (data?.success) {
+        onDeleted ? onDeleted(item.id) : router.refresh();
+      } else {
+        alert("Delete failed: " + (data?.error || "Unknown error"));
+      }
+    } catch (e: any) {
+      alert("Delete error: " + (e?.message || "Network error"));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const xHandle = item.x ? item.x.replace(/^@/, "") : null;
   const uploaderQuery = xHandle ? `@${xHandle}` : "";
+  const isOwner = !!getOwnerTokenFor(item.id);
 
   return (
     <div className="glass rounded-2xl p-3 card-hover flex flex-col">
@@ -68,7 +108,7 @@ export default function ArtworkCard({
           }}
         />
 
-        {/* ❤️ LIKE BADGE — overlay kanan-atas (area yang kamu coret) */}
+        {/* ❤️ LIKE BADGE */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -80,11 +120,7 @@ export default function ArtworkCard({
           className={`absolute top-2 right-2 select-none inline-flex items-center gap-1 rounded-full px-3 py-1.5 shadow-md backdrop-blur
             ${liked ? "bg-white text-red-600" : "bg-black/50 text-white hover:bg-black/60"}`}
         >
-          <Heart
-            className={`w-5 h-5 ${
-              liked ? "fill-current text-red-600" : "text-red-500"
-            }`}
-          />
+          <Heart className={`w-5 h-5 ${liked ? "fill-current text-red-600" : "text-red-500"}`} />
           <span className="text-sm font-medium">{likes}</span>
         </button>
       </div>
@@ -92,6 +128,7 @@ export default function ArtworkCard({
       <h3 className="mt-3 font-semibold truncate">{item.title}</h3>
 
       <div className="mt-2 flex items-center justify-between gap-3">
+        {/* LEFT: Links/Actions */}
         <div className="flex flex-wrap gap-2">
           {xHandle && (
             <button
@@ -106,10 +143,8 @@ export default function ArtworkCard({
           {item.discord && (
             <button
               onClick={async () => {
-                const handle = item.discord;
-                if (!handle) return;
                 try {
-                  await navigator.clipboard.writeText(handle);
+                  await navigator.clipboard.writeText(item.discord!);
                   alert("Discord handle copied.");
                 } catch {}
               }}
@@ -120,20 +155,42 @@ export default function ArtworkCard({
             </button>
           )}
 
-          {/* 🔎 SEARCH ON GALLERY -> /gallery?search=@username */}
           {xHandle && (
             <button
               className="btn-ghost text-sm px-3 py-1 inline-flex items-center gap-1"
               title="Search this uploader on Gallery"
-              onClick={() => router.push(`/gallery?search=${encodeURIComponent(uploaderQuery)}`)}
+              onClick={() =>
+                router.push(`/gallery?search=${encodeURIComponent(uploaderQuery)}`)
+              }
             >
               <Search className="w-4 h-4" />
               Search on Gallery
             </button>
           )}
         </div>
-        {/* (badge like dipindah ke overlay atas, jadi area kanan-bawah dibiarkan kosong / bisa isi lain) */}
-        <div />
+
+        {/* RIGHT: Owner-only controls */}
+        {isOwner && (
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-ghost text-sm px-2 py-1 inline-flex items-center gap-1"
+              onClick={() => router.push(`/edit/${encodeURIComponent(item.id)}`)}
+              title="Edit"
+            >
+              <Pencil className="w-4 h-4" />
+              Edit
+            </button>
+            <button
+              className="btn-ghost text-sm px-2 py-1 inline-flex items-center gap-1 text-red-500"
+              onClick={handleDelete}
+              disabled={deleting}
+              title="Delete"
+            >
+              <Trash2 className="w-4 h-4" />
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -273,19 +273,35 @@ export default function GalleryClient() {
                   {isOwner && (
                     <div className="mt-3 flex gap-2">
                       <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
-                      <button onClick={() => {
-                        const token = getOwnerTokenFor(it.id);
-                        if (!token) return alert("Delete token not found. Use the same browser you used to submit.");
-                        if (!confirm("Delete this artwork?")) return;
-                        fetch(`/api/art/${it.id}`, {
-                          method: "DELETE",
-                          headers: { "content-type": "application/json" },
-                          body: JSON.stringify({ token, metaUrl: it.metaUrl }),
-                        }).then(r => r.json()).then(j => {
-                          if (j?.success) setItems(prev => prev.filter(x => x.id !== it.id));
-                          else alert(j?.error || "Delete failed");
-                        });
-                      }} className="btn px-3 py-1 text-xs bg-red-500/30">🗑 Delete</button>
+                      <button
+                        onClick={async () => {
+                          const token = getOwnerTokenFor(it.id);
+                          if (!token) return alert("Delete token not found. Use the same browser you used to submit.");
+                          if (!confirm("Delete this artwork?")) return;
+
+                          try {
+                            const res = await fetch(`/api/art/${it.id}`, {
+                              method: "DELETE",
+                              headers: {
+                                "content-type": "application/json",
+                                "x-owner-token": token, // kirim via header
+                              },
+                              body: JSON.stringify({ metaUrl: it.metaUrl }), // optional
+                            });
+                            const j = await res.json();
+                            if (j?.success) {
+                              setItems((prev) => prev.filter((x) => x.id !== it.id));
+                            } else {
+                              alert(j?.error || "Delete failed");
+                            }
+                          } catch (e: any) {
+                            alert(e?.message || "Delete error");
+                          }
+                        }}
+                        className="btn px-3 py-1 text-xs bg-red-500/30"
+                      >
+                        🗑 Delete
+                      </button>
                     </div>
                   )}
                 </div>
