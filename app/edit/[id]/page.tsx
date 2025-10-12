@@ -94,23 +94,19 @@ export default function EditArtworkPage() {
       };
 
       const resp = await fetch(`/api/art/${item.id}`, {
-        method: "PATCH",
+        method: "PATCH", // server sekarang menerima PATCH/PUT/POST
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token, metaUrl: item.metaUrl, patch }),
       });
 
       const ct = resp.headers.get("content-type") || "";
-      let data: any = null;
-      if (resp.status === 204) data = { success: true };
-      else if (ct.includes("application/json")) data = await resp.json();
-      else data = resp.ok ? { success: true } : { success: false, error: await resp.text() };
+      const data = ct.includes("application/json") ? await resp.json() : { success: resp.ok };
 
       if (!resp.ok || data?.success === false) {
         throw new Error(data?.error || `${resp.status} ${resp.statusText}`);
       }
 
       alert("Saved successfully!");
-      // paksa gallery muat data baru
       router.replace(`/gallery?refresh=${Date.now()}`);
     } catch (e: any) {
       alert(e?.message || "Failed to save");
