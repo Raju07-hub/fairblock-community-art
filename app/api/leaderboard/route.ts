@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
-import { isoWeek, ym } from "@/lib/period";
+import { weekSatUTC, ym } from "@/lib/period";
 
 function toPairs(a: any[]) {
   const out: { id: string; score: number }[] = [];
@@ -18,7 +18,7 @@ export async function GET(req: Request) {
 
     let key: string;
     if (range === "weekly") {
-      key = `lb:art:weekly:${isoWeek()}`;
+      key = `lb:art:weekly:${weekSatUTC()}`;
     } else if (range === "monthly") {
       key = `lb:art:monthly:${ym()}`;
     } else {

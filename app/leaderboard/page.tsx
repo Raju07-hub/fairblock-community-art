@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -12,7 +13,7 @@ type TopItem = {
   url?: string;
 };
 
-type Scope = "weekly" | "monthly"; // <— hanya ini
+type Scope = "weekly" | "monthly";
 
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("weekly");
@@ -22,7 +23,8 @@ export default function LeaderboardPage() {
   const pill = (active: boolean) =>
     `btn px-4 py-1 rounded-full text-sm ${active ? "bg-[#3aaefc]/30" : "bg-white/10"}`;
   const btn = "btn px-4 py-1 rounded-full text-sm";
-  const badge = "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
+  const badge =
+    "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
   const heading = "text-2xl font-bold mb-3 text-[#3aaefc]";
 
   async function load() {
@@ -35,11 +37,16 @@ export default function LeaderboardPage() {
       setLoading(false);
     }
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope]);
 
-  const resetLabel = scope === "weekly"
-    ? "Weekly reset: setiap Senin 07:00 UTC+7"
-    : "Monthly reset: setiap tanggal 1 pukul 07:00 UTC+7";
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
+
+  const resetLabel =
+    scope === "weekly"
+      ? "Weekly reset: every Saturday at 07:00 UTC+7 (00:00 UTC)"
+      : "Monthly reset: on the 1st at 07:00 UTC+7";
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
@@ -56,7 +63,9 @@ export default function LeaderboardPage() {
             <button className={pill(scope === "weekly")} onClick={() => setScope("weekly")}>Weekly</button>
             <button className={pill(scope === "monthly")} onClick={() => setScope("monthly")}>Monthly</button>
           </div>
-          <button onClick={load} className={btn} disabled={loading}>↻ {loading ? "Refreshing…" : "Refresh"}</button>
+          <button onClick={load} className={btn} disabled={loading}>
+            ↻ {loading ? "Refreshing…" : "Refresh"}
+          </button>
         </div>
       </div>
 
@@ -72,20 +81,33 @@ export default function LeaderboardPage() {
               const discord = t.discord || "";
               const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
               const xProfile = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
+
               return (
                 <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
                   <div className="flex items-center gap-4 min-w-0">
                     <span className="w-7 text-center opacity-70">{idx + 1}.</span>
                     {t.url && (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={t.url} alt={title} className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl object-cover bg-white/10 shrink-0 shadow-md" loading="lazy" decoding="async" />
+                      <img
+                        src={t.url}
+                        alt={title}
+                        className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl object-cover bg-white/10 shrink-0 shadow-md"
+                        loading="lazy"
+                        decoding="async"
+                      />
                     )}
                     <div className="min-w-0">
                       <div className="font-medium truncate text-base">{title}</div>
+
                       <div className="mt-1 text-sm opacity-80 space-x-2">
-                        {xHandle && <a className="underline hover:opacity-90" href={xProfile} target="_blank" rel="noopener noreferrer">{xHandle}</a>}
+                        {xHandle && (
+                          <a className="underline hover:opacity-90" href={xProfile} target="_blank" rel="noopener noreferrer">
+                            {xHandle}
+                          </a>
+                        )}
                         {discord && <span className="opacity-70">· {discord}</span>}
                       </div>
+
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
                         {t.postUrl && <a href={t.postUrl} target="_blank" rel="noreferrer" className={btn}>Open Art Post</a>}
@@ -97,7 +119,7 @@ export default function LeaderboardPage() {
                 </div>
               );
             })}
-            {!topArts?.length && <div className="opacity-70">Belum ada data untuk periode ini.</div>}
+            {!topArts?.length && <div className="opacity-70">No data for this period yet.</div>}
           </div>
         </section>
       )}

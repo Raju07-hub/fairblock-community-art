@@ -1,4 +1,5 @@
 // lib/period.ts
+// ==== BASE OFFSET (dipakai util lama) ====
 const TZ_MIN = Number(process.env.RESET_TZ_MINUTES ?? 420); // default UTC+7
 
 function nowLocal() {
@@ -7,6 +8,7 @@ function nowLocal() {
 }
 function pad(n: number) { return n < 10 ? `0${n}` : `${n}`; }
 
+// ==== HARIAN (EXISTING) ====
 export function ymd() {
   const n = nowLocal();
   const y = n.getUTCFullYear();
@@ -15,6 +17,7 @@ export function ymd() {
   return `${y}-${m}-${d}`;
 }
 
+// ==== ISO WEEK (EXISTING) =====
 export function isoWeek() {
   const n = nowLocal();
   const date = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
@@ -38,16 +41,14 @@ export function prevIsoWeek(w: string) {
   return `${y}-W${pad(num)}`;
 }
 
-// --- tambahkan di bawah export function prevIsoWeek(...)
+// ==== BULANAN (untuk leaderboard monthly) ====
 export function ym() {
-  const n = nowLocal();
+  const n = nowLocal(); // reset bulanan tetap mengikuti TZ_MIN (UTC+7 → jam 07:00)
   const y = n.getUTCFullYear();
-  const m = (n.getUTCMonth() + 1).toString().padStart(2, "0");
-  return `${y}-${m}`;            // contoh: 2025-10
+  const m = pad(n.getUTCMonth() + 1);
+  return `${y}-${m}`; // ex: 2025-10
 }
-
 export function prevYm(s?: string) {
-  // optional util: mundur 1 bulan dari "YYYY-MM" (atau dari nowLocal() kalau undefined)
   let y: number, m: number;
   if (s) {
     const [yy, mm] = s.split("-").map(Number);
@@ -58,7 +59,45 @@ export function prevYm(s?: string) {
   }
   const d = new Date(Date.UTC(y, m - 1, 1));
   const yy = d.getUTCFullYear();
-  const mm = (d.getUTCMonth() + 1).toString().padStart(2, "0");
+  const mm = pad(d.getUTCMonth() + 1);
   return `${yy}-${mm}`;
 }
 
+// ==== MINGGUAN DENGAN BATAS SABTU 00:00 UTC ====
+// Kunci mingguan berbasis UTC: tiap minggu dimulai Sabtu 00:00 UTC
+export function weekSatUTC(date = new Date()) {
+  // Ambil tanggal UTC (tanpa offset lokal)
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth();
+  const d = date.getUTCDate();
+  const utcMidnight = new Date(Date.UTC(y, m, d)); // 00:00 UTC
+
+  const weekday = utcMidnight.getUTCDay(); // 0=Sun..6=Sat
+  // Kita ingin "awal minggu" = Sabtu 00:00 UTC.
+  // Hitung jarak ke Sabtu (6).
+  const daysFromWeekStart = (weekday - 6 + 7) % 7; // 0 kalau Sabtu
+  const weekStart = new Date(utcMidnight);
+  weekStart.setUTCDate(weekStart.getUTCDate() - daysFromWeekStart);
+
+  // Minggu pertama tahun: yang berisi Sabtu pertama tahun itu.
+  const yStart = new Date(Date.UTC(weekStart.getUTCFullYear(), 0, 1));
+  const yStartWeekday = yStart.getUTCDay();
+  const daysFromWeekStartYear = (yStartWeekday - 6 + 7) % 7;
+  const firstWeekStart = new Date(yStart);
+  firstWeekStart.setUTCDate(firstWeekStart.getUTCDate() - daysFromWeekStartYear);
+
+  const weekNo = Math.floor((+weekStart - +firstWeekStart) / 86400000 / 7) + 1;
+  const yearOfWeek = weekStart.getUTCFullYear();
+
+  return `${yearOfWeek}-W${pad(weekNo)}`; // contoh: 2025-W41
+}
+
+// (opsional) next reset stamp Sabtu 00:00 UTC
+export function nextWeeklyResetUTC(from = new Date()) {
+  const f = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate())); // 00:00 UTC
+  const wd = f.getUTCDay();
+  let daysAhead = (6 - wd + 7) % 7; // to Saturday
+  let target = new Date(f.getTime() + daysAhead * 86400000);
+  if (+from >= +target) target = new Date(target.getTime() + 7 * 86400000);
+  return target; // Date di 00:00 UTC Sabtu
+}
