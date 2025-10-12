@@ -13,15 +13,18 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
-  ownerTokenHash?: string; // ← new
+  ownerTokenHash?: string;
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
+
+// ==================== UTILITIES ====================
 
 function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
 }
+
 function getOwnerTokenFor(id: string): string | null {
   try {
     const raw = localStorage.getItem("fairblock:tokens");
@@ -32,6 +35,7 @@ function getOwnerTokenFor(id: string): string | null {
     return null;
   }
 }
+
 async function copyTextForce(text: string) {
   if (!text) return false;
   try {
@@ -55,77 +59,29 @@ async function copyTextForce(text: string) {
   }
 }
 
-/** Hash helper (hex, sama seperti server sha256) */
-async function sha256Hex(input: string) {
-  const enc = new TextEncoder().encode(input);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  const arr = Array.from(new Uint8Array(buf));
-  return arr.map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Gabung semua kemungkinan storage lama jadi 1 map {idOrKey: token} */
-function readAllLegacyTokenMaps(): Record<string, string> {
-  const keys = ["fairblock:tokens", "fb:tokens", "gallery:tokens", "fairblock:deleteTokens"];
-  const out: Record<string, string> = {};
-  for (const k of keys) {
-    try {
-      const raw = localStorage.getItem(k);
+// 🔄 Merge old token storages (legacy compatibility)
+function mergeLegacyTokens() {
+  try {
+    const merged: Record<string, string> = {};
+    const sources = ["fairblock:tokens", "fb:tokens", "gallery:tokens", "fairblock:deleteTokens"];
+    for (const key of sources) {
+      const raw = localStorage.getItem(key);
       if (!raw) continue;
       const obj = JSON.parse(raw);
-      if (!obj || typeof obj !== "object") continue;
-
-      if (Array.isArray(obj)) {
-        for (const it of obj) {
-          if (Array.isArray(it) && it[0] && it[1]) out[String(it[0])] = String(it[1]);
-          else if (it && typeof it === "object" && it.id && it.token) out[String(it.id)] = String(it.token);
+      if (obj && typeof obj === "object") {
+        for (const [id, token] of Object.entries(obj)) {
+          if (typeof id === "string" && typeof token === "string") merged[id] = token;
         }
-      } else {
-        for (const [id, t] of Object.entries(obj)) out[String(id)] = String(t as any);
       }
-    } catch {}
-  }
-  return out;
-}
-
-/** Simpan map final owner tokens hanya ke key baru "fairblock:tokens" */
-function writeOwnerMap(map: Record<string, string>) {
-  try {
-    localStorage.setItem("fairblock:tokens", JSON.stringify(map));
-  } catch {}
-}
-
-/** Auto-rebind: cocokan token lama (by hash) ke item yang tampil */
-async function autoRebindLegacyTokens(items: GalleryItem[]) {
-  if (typeof window === "undefined" || !items?.length) return;
-
-  // ambil map saat ini & semua kandidat token lama
-  let current: Record<string, string> = {};
-  try { current = JSON.parse(localStorage.getItem("fairblock:tokens") || "{}"); } catch {}
-
-  const candidates = readAllLegacyTokenMaps();
-  const candidateList = Object.values(candidates).filter(Boolean);
-  if (!candidateList.length) return;
-
-  // Buat lookup hash => token (biar hash sekali per token)
-  const hashToToken: Record<string, string> = {};
-  await Promise.all(candidateList.map(async (tok) => {
-    const h = await sha256Hex(tok);
-    hashToToken[h] = tok;
-  }));
-
-  // Cocokkan per item (yang belum punya token)
-  let changed = false;
-  for (const it of items) {
-    if (!it.ownerTokenHash || current[it.id]) continue;
-    const token = hashToToken[it.ownerTokenHash];
-    if (token) {
-      current[it.id] = token;
-      changed = true;
     }
+    localStorage.setItem("fairblock:tokens", JSON.stringify(merged));
+    return merged;
+  } catch {
+    return {};
   }
-
-  if (changed) writeOwnerMap(current);
 }
+
+// ==================== MAIN COMPONENT ====================
 
 export default function GalleryClient() {
   const [items, setItems] = useState<GalleryItem[]>([]);
@@ -140,6 +96,11 @@ export default function GalleryClient() {
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
 
+  // Merge legacy tokens on mount
+  useEffect(() => {
+    mergeLegacyTokens();
+  }, []);
+
   async function load() {
     setLoading(true);
     try {
@@ -147,9 +108,6 @@ export default function GalleryClient() {
       const j = await fetch(`/api/gallery?ts=${ts}`, { cache: "no-store" }).then((r) => r.json());
       const list: GalleryItem[] = j?.items || [];
       setItems(list);
-
-      // 🔁 rebind token lama -> id baru
-      await autoRebindLegacyTokens(list);
 
       if (list.length) {
         const ids = list.map((i) => i.id).join(",");
@@ -162,6 +120,7 @@ export default function GalleryClient() {
       setLoading(false);
     }
   }
+
   useEffect(() => {
     load();
   }, []);
@@ -195,7 +154,7 @@ export default function GalleryClient() {
     return list;
   }, [items, query, onlyMine, sort]);
 
-  // --- Lightbox helpers
+  // Lightbox helpers
   function openAt(i: number) {
     setAnimDir(null);
     setSelectedIndex(i);
@@ -231,9 +190,11 @@ export default function GalleryClient() {
     return () => clearTimeout(t);
   }, [selectedIndex]);
 
+  // ==================== RENDER ====================
+
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10 relative">
-      {/* === Action bar === */}
+      {/* Action bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
@@ -294,7 +255,8 @@ export default function GalleryClient() {
                   <img
                     src={it.url}
                     alt={it.title}
-                    className="w-full aspect-[4/3] object-contain bg-black/20"  // tampilkan full (tanpa crop)
+                    className="w-full object-contain bg-black transition-transform duration-300 hover:scale-[1.02]"
+                    style={{ maxHeight: "300px" }}
                   />
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
                   <button
@@ -386,111 +348,3 @@ export default function GalleryClient() {
           })}
         </div>
       )}
-
-      {/* === Lightbox === */}
-      {selectedIndex !== null && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-          onClick={closeLightbox}
-        >
-          <div
-            className="relative max-w-4xl w-[80%] h-[80vh] flex flex-col items-center justify-center"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className={[
-                "relative flex-1 w-full flex items-center justify-center transition-all duration-300",
-                enterPhase
-                  ? "opacity-100 translate-x-0"
-                  : animDir === "right"
-                  ? "opacity-0 translate-x-6"
-                  : animDir === "left"
-                  ? "opacity-0 -translate-x-6"
-                  : "opacity-0 translate-y-2",
-              ].join(" ")}
-            >
-              <img
-                src={filtered[selectedIndex].url}
-                alt={filtered[selectedIndex].title}
-                className="max-h-[70vh] w-auto rounded-xl shadow-2xl object-contain"
-              />
-
-              <button
-                className="absolute top-3 right-3 bg-white/20 hover:bg-white/30 rounded-full p-2"
-                onClick={closeLightbox}
-                aria-label="Close preview"
-              >
-                <X className="w-6 h-6 text-white" />
-              </button>
-
-              <button
-                className="absolute left-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
-                onClick={prevImage}
-                aria-label="Previous artwork"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-              <button
-                className="absolute right-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
-                onClick={nextImage}
-                aria-label="Next artwork"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            </div>
-
-            {(() => {
-              const sel = filtered[selectedIndex];
-              const xHandle = sel.x ? (sel.x.startsWith("@") ? sel.x : `@${sel.x}`) : "";
-              const discordName = (sel.discord || "").replace(/^@/, "");
-              const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
-              const openPost =
-                sel.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(sel.postUrl) ? sel.postUrl : "";
-
-              return (
-                <div
-                  className={[
-                    "w-full max-w-3xl mt-4 glass rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 transition-all duration-300",
-                    enterPhase ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
-                  ].join(" ")}
-                >
-                  <div>
-                    <div className="font-semibold">{sel.title}</div>
-                    <div className="text-sm text-white/70 mt-1">
-                      {xHandle && (
-                        <a
-                          href={xUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline text-sky-300 hover:text-sky-200"
-                        >
-                          {xHandle}
-                        </a>
-                      )}
-                      {discordName && (
-                        <>
-                          <span> · </span>
-                          <span>{discordName}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {openPost && (
-                    <a
-                      href={openPost}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn px-4 py-1 text-sm"
-                    >
-                      Open Art Post ↗
-                    </a>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
