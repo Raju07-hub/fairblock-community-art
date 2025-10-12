@@ -18,8 +18,6 @@ type GalleryItem = {
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
 
-// ==================== UTILITIES ====================
-
 function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
@@ -81,8 +79,6 @@ function mergeLegacyTokens() {
   }
 }
 
-// ==================== MAIN COMPONENT ====================
-
 export default function GalleryClient() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [likes, setLikes] = useState<LikeMap>({});
@@ -91,12 +87,10 @@ export default function GalleryClient() {
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
-  // lightbox
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
 
-  // Merge legacy tokens on mount
   useEffect(() => {
     mergeLegacyTokens();
   }, []);
@@ -154,7 +148,6 @@ export default function GalleryClient() {
     return list;
   }, [items, query, onlyMine, sort]);
 
-  // Lightbox helpers
   function openAt(i: number) {
     setAnimDir(null);
     setSelectedIndex(i);
@@ -190,11 +183,8 @@ export default function GalleryClient() {
     return () => clearTimeout(t);
   }, [selectedIndex]);
 
-  // ==================== RENDER ====================
-
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10 relative">
-      {/* Action bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
@@ -258,7 +248,6 @@ export default function GalleryClient() {
                     className="w-full object-contain bg-black transition-transform duration-300 hover:scale-[1.02]"
                     style={{ maxHeight: "300px" }}
                   />
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleLike(it); }}
                     aria-pressed={like.liked}
@@ -286,26 +275,6 @@ export default function GalleryClient() {
                         <span>{discordName}</span>
                       </>
                     )}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button className="btn px-3 py-1 text-xs" onClick={() => setQuery(xHandle || discordName || "")}>
-                      Search on Gallery
-                    </button>
-                    {openPost && (
-                      <a href={openPost} target="_blank" rel="noreferrer" className="btn px-3 py-1 text-xs">
-                        Open Art Post
-                      </a>
-                    )}
-                    <button
-                      className="btn px-3 py-1 text-xs"
-                      onClick={async () => {
-                        const ok = await copyTextForce(discordName || xHandle || "");
-                        alert(ok ? "Copied!" : "Copy failed.");
-                      }}
-                    >
-                      Copy Discord
-                    </button>
                   </div>
 
                   {isOwner && (
@@ -348,3 +317,6 @@ export default function GalleryClient() {
           })}
         </div>
       )}
+    </div>
+  );
+}
