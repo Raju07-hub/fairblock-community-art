@@ -50,6 +50,8 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> })
 
     const files: string[] = [metaUrl];
     if (meta?.imageUrl) files.push(meta.imageUrl);
+    else if (meta?.url) files.push(meta.url);
+
     await blobDel(files, { token: process.env.BLOB_READ_WRITE_TOKEN! });
 
     return NextResponse.json({ success: true });
@@ -110,14 +112,19 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    // meta baru
+    // Pastikan URL gambar tidak hilang untuk legacy item
+    const oldImageUrl: string =
+      (old?.imageUrl as string) || (old?.url as string) || "";
+
+    // meta baru (backward-compat: tulis imageUrl & url sekaligus)
     const nextMeta = {
       id: old.id,
       title: String(title ?? old.title).trim(),
       x: normHandle(x ?? old.x),
       discord: normHandle(discord ?? old.discord),
       postUrl: normPostUrl(postUrl ?? old.postUrl),
-      imageUrl: old.imageUrl,
+      imageUrl: oldImageUrl,
+      url: oldImageUrl, // penting untuk legacy reader
       createdAt: old.createdAt,
       ownerTokenHash: nextOwnerHash,
     };
