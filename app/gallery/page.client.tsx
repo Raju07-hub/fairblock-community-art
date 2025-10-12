@@ -1,9 +1,9 @@
-// app/gallery/page.client.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Heart, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { useSearchParams } from "next/navigation"; // ⬅️ Tambahan
 
 type GalleryItem = {
   id: string;
@@ -344,6 +344,20 @@ export default function GalleryClient() {
     return () => clearTimeout(t);
   }, [selectedIndex]);
 
+  // ⬇️⬇️ Tambahan: auto-scroll + highlight kartu dari ?select=<id>
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const sel = searchParams.get("select");
+    if (!sel) return;
+    const el = document.getElementById(`art-${sel}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-sky-400");
+    const t = setTimeout(() => el.classList.remove("ring-2", "ring-sky-400"), 2500);
+    return () => clearTimeout(t);
+  }, [searchParams]);
+  // ⬆️⬆️ Tambahan selesai
+
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10 relative">
       {/* === Action bar === */}
@@ -401,7 +415,11 @@ export default function GalleryClient() {
             const isOwner = !!getOwnerTokenFor(it.id);
 
             return (
-              <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
+              <div
+                id={`art-${it.id}`} // ⬅️ Tambahan: anchor supaya bisa diloncatin dari leaderboard
+                key={it.id}
+                className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]"
+              >
                 <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
                   <img src={it.url} alt={it.title} className="w-full aspect-[4/3] object-contain bg-black/20" />
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />

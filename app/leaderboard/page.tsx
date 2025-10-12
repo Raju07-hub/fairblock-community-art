@@ -3,8 +3,24 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type Scope = "weekly" | "monthly";
-type TopItem = { id: string; likes?: number; title?: string; owner?: string; discord?: string; postUrl?: string; url?: string };
-type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; metaUrl?: string; postUrl?: string };
+type TopItem = {
+  id: string;
+  likes?: number;
+  title?: string;
+  owner?: string;   // @handle
+  discord?: string;
+  postUrl?: string; // X/Twitter art post
+  url?: string;
+};
+type GalleryItem = {
+  id: string;
+  title: string;
+  url: string;
+  x?: string;
+  discord?: string;
+  metaUrl?: string;
+  postUrl?: string;
+};
 
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("weekly");
@@ -38,10 +54,10 @@ export default function LeaderboardPage() {
   useEffect(() => { loadGallery(); }, []);
   useEffect(() => { loadLB(); }, [scope]);
 
-  // polling 10s untuk realtime Top Art
+  // realtime polling 10s
   useEffect(() => { const t = setInterval(loadLB, 10000); return () => clearInterval(t); }, [scope]);
 
-  // creators by uploads dari gallery
+  // creators by uploads dari /api/gallery (client side)
   const topCreatorsUploads = useMemo(() => {
     const map = new Map<string, number>();
     for (const it of gallery) {
@@ -94,15 +110,26 @@ export default function LeaderboardPage() {
                 const title = t.title ?? "Untitled";
                 const xHandle = t.owner || "";
                 const discord = t.discord || "";
-                const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
+
+                // Link ke kartu gallery: query ?select=ID + anchor #art-ID
+                const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}#art-${encodeURIComponent(t.id)}`;
+
                 const xProfile = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
+                const postUrl = t.postUrl || ""; // dari /api/leaderboard (enriched dari /api/gallery)
+
                 return (
                   <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
                     <div className="flex items-center gap-4 min-w-0">
                       <span className="w-7 text-center opacity-70">{idx + 1}.</span>
                       {t.url && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={t.url} alt={title} className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl object-cover bg-white/10 shrink-0 shadow-md" loading="lazy" decoding="async" />
+                        <img
+                          src={t.url}
+                          alt={title}
+                          className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl object-cover bg-white/10 shrink-0 shadow-md"
+                          loading="lazy"
+                          decoding="async"
+                        />
                       )}
                       <div className="min-w-0">
                         <div className="font-medium truncate text-base">{title}</div>
@@ -112,7 +139,10 @@ export default function LeaderboardPage() {
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
-                          {xHandle && <a href={xProfile} target="_blank" rel="noreferrer" className={btn}>Open X Profile</a>}
+                          {postUrl
+                            ? <a href={postUrl} target="_blank" rel="noreferrer" className={btn}>Open X Art Post</a>
+                            : (xHandle && <a href={xProfile} target="_blank" rel="noreferrer" className={btn}>Open X Profile</a>)
+                          }
                         </div>
                       </div>
                     </div>
