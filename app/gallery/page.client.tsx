@@ -64,30 +64,6 @@ async function sha256Hex(input: string) {
   return arr.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Gabung semua kemungkinan storage lama jadi 1 map {idOrKey: token} */
-function readAllLegacyTokenMaps(): Record<string, string> {
-  const keys = ["fairblock:tokens", "fb:tokens", "gallery:tokens", "fairblock:deleteTokens"];
-  const out: Record<string, string> = {};
-  for (const k of keys) {
-    try {
-      const raw = localStorage.getItem(k);
-      if (!raw) continue;
-      const obj = JSON.parse(raw);
-      if (!obj || typeof obj !== "object") continue;
-
-      if (Array.isArray(obj)) {
-        for (const it of obj) {
-          if (Array.isArray(it) && it[0] && it[1]) out[String(it[0])] = String(it[1]);
-          else if (it && typeof it === "object" && it.id && it.token) out[String(it.id)] = String(it.token);
-        }
-      } else {
-        for (const [id, t] of Object.entries(obj)) out[String(id)] = String(t as any);
-      }
-    } catch {}
-  }
-  return out;
-}
-
 /** Simpan map final owner tokens hanya ke key baru "fairblock:tokens" */
 function writeOwnerMap(map: Record<string, string>) {
   try {
@@ -95,7 +71,7 @@ function writeOwnerMap(map: Record<string, string>) {
   } catch {}
 }
 
-/** === Tambahan helper ringan untuk auto-claim === */
+/** === Helper modern owner map === */
 function readOwnerMap(): Record<string, string> {
   try {
     return JSON.parse(localStorage.getItem("fairblock:tokens") || "{}");
@@ -109,36 +85,100 @@ function bindOwnerToken(id: string, token: string) {
   writeOwnerMap(cur);
 }
 
-/** Auto-rebind: cocokan token lama (by hash) ke item yang tampil */
+/** Deep scan seluruh localStorage untuk mengumpulkan kandidat token (tanpa asumsi key/format) */
+function scanAllLocalStorageTokenCandidates(): string[] {
+  const out = new Set<string>();
+
+  function addStr(s: unknown) {
+    if (typeof s !== "string") return;
+    const v = s.trim();
+    if (v.length < 8) return; // saring noise yang terlalu pendek
+    out.add(v);
+  }
+
+  const len = localStorage.length;
+  for (let i = 0; i < len; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+
+    const keyLower = k.toLowerCase();
+    // Skip entri umum yang bukan milik app
+    if (keyLower.startsWith("vercel") || keyLower.includes("ga:") || keyLower.includes("firebase")) continue;
+
+    const raw = localStorage.getItem(k);
+    if (!raw) continue;
+
+    // coba JSON
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+
+    if (parsed && typeof parsed === "object") {
+      if (Array.isArray(parsed)) {
+        for (const it of parsed) {
+          if (typeof it === "string") addStr(it);
+          else if (it && typeof it === "object") {
+            for (const v of Object.values(it)) addStr(v as any);
+          }
+        }
+      } else {
+        for (const v of Object.values(parsed)) {
+          if (typeof v === "string") addStr(v);
+          else if (Array.isArray(v)) {
+            for (const x of v) {
+              if (typeof x === "string") addStr(x);
+              else if (x && typeof x === "object") {
+                for (const y of Object.values(x)) addStr(y as any);
+              }
+            }
+          } else if (v && typeof v === "object") {
+            for (const y of Object.values(v as any)) addStr(y as any);
+          }
+        }
+      }
+    } else {
+      // plain string
+      addStr(raw);
+    }
+  }
+
+  return Array.from(out);
+}
+
+/** Auto-rebind: cocokkan kandidat token (hash) ke item yang SUDAH punya ownerTokenHash */
 async function autoRebindLegacyTokens(items: GalleryItem[]) {
   if (typeof window === "undefined" || !items?.length) return;
 
-  // ambil map saat ini & semua kandidat token lama
+  // map modern saat ini
   let current: Record<string, string> = {};
   try {
     current = JSON.parse(localStorage.getItem("fairblock:tokens") || "{}");
   } catch {}
 
-  const candidates = readAllLegacyTokenMaps();
-  const candidateList = Object.values(candidates).filter(Boolean);
-  if (!candidateList.length) return;
+  const candidates = scanAllLocalStorageTokenCandidates();
+  if (!candidates.length) return;
 
-  // Buat lookup hash => token (biar hash sekali per token)
+  // precompute hash semua kandidat
   const hashToToken: Record<string, string> = {};
   await Promise.all(
-    candidateList.map(async (tok) => {
-      const h = await sha256Hex(tok);
-      hashToToken[h] = tok;
+    candidates.map(async (tok) => {
+      try {
+        const h = await sha256Hex(tok);
+        hashToToken[h] = tok;
+      } catch {}
     })
   );
 
-  // Cocokkan per item (yang belum punya token)
+  // cocokkan per item
   let changed = false;
   for (const it of items) {
     if (!it.ownerTokenHash || current[it.id]) continue;
-    const token = hashToToken[it.ownerTokenHash];
-    if (token) {
-      current[it.id] = token;
+    const tok = hashToToken[it.ownerTokenHash];
+    if (tok) {
+      current[it.id] = tok;
       changed = true;
     }
   }
@@ -147,44 +187,46 @@ async function autoRebindLegacyTokens(items: GalleryItem[]) {
 }
 
 /**
- * Auto-first-claim utk item lama:
- * - item belum punya ownerTokenHash
- * - browser punya token lama untuk id tsb (di legacy storage)
- * → kirim PUT /api/art/[id] untuk menulis ownerTokenHash
- * → simpan token ke storage modern agar isOwner() langsung true
+ * Auto-first-claim utk item lama (BELUM punya ownerTokenHash).
+ * Coba beberapa kandidat token (maks 10) dari deep scan sampai salah satu sukses.
  */
 async function autoFirstClaimMissingOwnerHash(items: GalleryItem[]) {
   if (typeof window === "undefined" || !items?.length) return;
 
-  const legacy = readAllLegacyTokenMaps();
-  const targets = items.filter((it) => !it.ownerTokenHash && legacy[it.id] && it.metaUrl);
+  const candidates = scanAllLocalStorageTokenCandidates();
+  if (!candidates.length) return;
 
+  const MAX_TRY_PER_ITEM = 10;
+  const targets = items.filter((it) => !it.ownerTokenHash && it.metaUrl);
   if (!targets.length) return;
 
   for (const it of targets) {
-    const token = legacy[it.id];
-    if (!token) continue;
+    let bound = false;
+    for (let i = 0; i < Math.min(MAX_TRY_PER_ITEM, candidates.length); i++) {
+      const token = candidates[i];
+      try {
+        const res = await fetch(`/api/art/${encodeURIComponent(it.id)}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json", "x-owner-token": token },
+          body: JSON.stringify({ metaUrl: it.metaUrl, patch: {} }),
+        });
 
-    try {
-      const res = await fetch(`/api/art/${encodeURIComponent(it.id)}`, {
-        method: "PUT",
-        headers: {
-          "content-type": "application/json",
-          "x-owner-token": token,
-        },
-        body: JSON.stringify({ metaUrl: it.metaUrl, patch: {} }),
-      });
-
-      if (res.ok) {
-        const j = await res.json().catch(() => null);
-        const newHash = j?.meta?.ownerTokenHash;
-        if (newHash) {
-          bindOwnerToken(it.id, token);
+        if (res.ok) {
+          const j = await res.json().catch(() => null);
+          const newHash = j?.meta?.ownerTokenHash;
+          if (newHash) {
+            const cur = JSON.parse(localStorage.getItem("fairblock:tokens") || "{}");
+            cur[it.id] = token;
+            localStorage.setItem("fairblock:tokens", JSON.stringify(cur));
+            bound = true;
+            break;
+          }
         }
+      } catch {
+        // lanjut kandidat berikutnya
       }
-    } catch {
-      // diamkan agar tidak mengganggu UX
     }
+    // kalau tidak ketemu, diamkan; user bukan owner di browser ini
   }
 }
 
@@ -209,10 +251,10 @@ export default function GalleryClient() {
       const list: GalleryItem[] = j?.items || [];
       setItems(list);
 
-      // 🔁 rebind token lama -> id baru
+      // 1) rebind token untuk item yang sudah punya ownerTokenHash
       await autoRebindLegacyTokens(list);
 
-      // 🆕 auto-claim untuk item lama yang belum punya ownerTokenHash
+      // 2) first-claim untuk item lama yang belum punya ownerTokenHash
       await autoFirstClaimMissingOwnerHash(list);
 
       // re-render ringan agar tombol Edit/Delete langsung muncul
