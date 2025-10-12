@@ -74,9 +74,10 @@ function extractMetaTokens(meta: any): string[] {
 }
 
 function isAdminOverride(req: NextRequest): boolean {
-  const hdr = req.headers.get("x-admin-token") || "";
-  const admin = process.env.ADMIN_TOKEN || "";
-  return !!admin && hdr && hdr === admin;
+  const hdr = req.headers.get("x-admin-token") ?? "";
+  const admin = process.env.ADMIN_TOKEN ?? "";
+  // pastikan semua boolean murni
+  return Boolean(admin) && Boolean(hdr) && hdr === admin;
 }
 
 async function handleUpdate(
