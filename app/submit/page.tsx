@@ -12,11 +12,10 @@ function normAt(v: string) {
 
 export default function SubmitPage() {
   const router = useRouter();
-
   const [title, setTitle] = useState("");
   const [x, setX] = useState("");
   const [discord, setDiscord] = useState("");
-  const [postUrl, setPostUrl] = useState(""); // NEW
+  const [postUrl, setPostUrl] = useState(""); // NEW optional
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -54,34 +53,26 @@ export default function SubmitPage() {
       fd.append("title", title.trim());
       fd.append("x", normAt(x));
       fd.append("discord", normAt(discord));
-      fd.append("postUrl", postUrl.trim()); // NEW (optional)
+      fd.append("postUrl", postUrl.trim());
       fd.append("file", file);
 
-      const res = await fetch("/api/submit", {
-        method: "POST",
-        body: fd,
-      });
-
+      const res = await fetch("/api/submit", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.success === false) {
+      if (!res.ok || data?.success === false)
         throw new Error(data?.error || `${res.status} ${res.statusText}`);
-      }
 
-      // simpan token untuk edit/delete di browser ini (legacy + global)
+      // simpan token owner untuk edit/delete
       const id: string = data.id;
       const deleteToken: string = data.deleteToken;
       if (id && deleteToken) {
-        try {
-          const RAW = localStorage.getItem("fairblock:tokens");
-          const map = RAW ? JSON.parse(RAW) : {};
-          map[id] = deleteToken;
-          localStorage.setItem("fairblock:tokens", JSON.stringify(map));
-          localStorage.setItem("fairblock:owner-token", deleteToken);
-        } catch {}
+        const RAW = localStorage.getItem("fairblock:tokens");
+        const map = RAW ? JSON.parse(RAW) : {};
+        map[id] = deleteToken;
+        localStorage.setItem("fairblock:tokens", JSON.stringify(map));
       }
 
-      alert("Submitted successfully! Thanks for sharing ✨");
-      router.replace(`/gallery?refresh=${Date.now()}`); // langsung ke Gallery terbaru
+      alert("Submitted successfully! ✨ Redirecting to Gallery...");
+      router.replace(`/gallery?refresh=${Date.now()}`);
     } catch (e: any) {
       alert(e?.message || "Submit failed");
     } finally {
@@ -90,8 +81,8 @@ export default function SubmitPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-5 sm:px-6 py-10">
-      {/* Top actions seperti dulu */}
+    <div className="max-w-3xl mx-auto px-5 sm:px-6 py-10">
+      {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <Link href="/" className="btn">⬅ Back to Home</Link>
         <Link href="/gallery" className="btn">View Gallery</Link>
@@ -99,13 +90,13 @@ export default function SubmitPage() {
 
       <h1 className="text-3xl font-bold mb-6 text-white/90">Submit Your Art</h1>
 
-      {/* Panel form gaya lama */}
-      <div className="glass rounded-2xl p-5 sm:p-7 border border-white/10">
+      {/* Form container (lebih kecil dan padat) */}
+      <div className="glass rounded-2xl p-6 border border-white/10 space-y-5">
         {/* Title */}
-        <label className="block mb-4">
-          <div className="mb-2 text-sm opacity-80">Title</div>
+        <label className="block">
+          <div className="mb-1 text-sm opacity-80">Title</div>
           <input
-            className="w-full px-4 py-3 rounded-xl bg-white/10 outline-none"
+            className="w-full px-4 py-2.5 rounded-xl bg-white/10 outline-none"
             placeholder="Title — e.g. Confidential Beam"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -113,20 +104,20 @@ export default function SubmitPage() {
         </label>
 
         {/* Handles */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <label className="block">
-            <div className="mb-2 text-sm opacity-80">Username X</div>
+            <div className="mb-1 text-sm opacity-80">Username X</div>
             <input
-              className="w-full px-4 py-3 rounded-xl bg-white/10 outline-none"
+              className="w-full px-4 py-2.5 rounded-xl bg-white/10 outline-none"
               placeholder="e.g. @kanjuro"
               value={x}
               onChange={(e) => setX(e.target.value)}
             />
           </label>
           <label className="block">
-            <div className="mb-2 text-sm opacity-80">Username Discord</div>
+            <div className="mb-1 text-sm opacity-80">Username Discord</div>
             <input
-              className="w-full px-4 py-3 rounded-xl bg-white/10 outline-none"
+              className="w-full px-4 py-2.5 rounded-xl bg-white/10 outline-none"
               placeholder="e.g. name#1234 or username"
               value={discord}
               onChange={(e) => setDiscord(e.target.value)}
@@ -134,11 +125,11 @@ export default function SubmitPage() {
           </label>
         </div>
 
-        {/* Your Art Post (X/Twitter) — NEW optional */}
-        <label className="block mb-4">
-          <div className="mb-2 text-sm opacity-80">Your Art Post (X/Twitter) — optional</div>
+        {/* Art Post URL (optional) */}
+        <label className="block">
+          <div className="mb-1 text-sm opacity-80">Your Art Post (X/Twitter) — optional</div>
           <input
-            className="w-full px-4 py-3 rounded-xl bg-white/10 outline-none"
+            className="w-full px-4 py-2.5 rounded-xl bg-white/10 outline-none"
             placeholder="https://x.com/yourhandle/status/1234567890"
             value={postUrl}
             onChange={(e) => setPostUrl(e.target.value)}
@@ -148,11 +139,11 @@ export default function SubmitPage() {
           </div>
         </label>
 
-        {/* Drag & Drop area */}
+        {/* File upload area */}
         <div
           className={`rounded-2xl border-2 border-dashed ${
-            dragOver ? "border-white/70" : "border-white/20"
-          } bg-black/20 p-6 sm:p-10 text-center mb-5 transition`}
+            dragOver ? "border-white/60" : "border-white/20"
+          } bg-black/30 p-6 text-center transition`}
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -164,15 +155,12 @@ export default function SubmitPage() {
           role="button"
           tabIndex={0}
         >
-          <p className="mb-2">Drag & drop image here, or click to choose</p>
-          <p className="text-sm opacity-70">
-            Format: PNG / JPG / WEBP — Max 8MB
-          </p>
+          <p className="mb-1 text-sm">Drag & drop image here, or click to choose</p>
+          <p className="text-xs opacity-70 mb-2">Format: PNG / JPG / WEBP — Max 8MB</p>
 
           {file && (
-            <div className="mt-4 inline-flex items-center gap-2 text-sm">
-              <span className="opacity-80">Selected:</span>
-              <span className="font-medium">{file.name}</span>
+            <div className="mt-2 text-sm opacity-80">
+              Selected: <span className="font-medium">{file.name}</span>
             </div>
           )}
 
@@ -185,7 +173,8 @@ export default function SubmitPage() {
           />
         </div>
 
-        <div className="flex gap-3">
+        {/* Submit buttons */}
+        <div className="flex gap-3 pt-2">
           <button onClick={onSubmit} disabled={busy} className="btn">
             {busy ? "Submitting…" : "Submit"}
           </button>
