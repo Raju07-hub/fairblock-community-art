@@ -1,12 +1,18 @@
 // /app/api/art/[id]/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import kv from "@/lib/kv";
-
 export const runtime = "nodejs";
-// (opsional) jika data sering berubah:
-// export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic";
+
+import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
+
+// Vercel Blob
+import { del as blobDel } from "@vercel/blob";
 
 type Params = { id: string };
+
+function sha256(s: string) {
+  return createHash("sha256").update(s).digest("hex");
+}
 
 // DELETE /api/art/:id
 export async function DELETE(
@@ -14,52 +20,84 @@ export async function DELETE(
   context: { params: Promise<Params> } // Next.js 15: params is a Promise
 ) {
   try {
-    const { id } = await context.params; // ← WAJIB di-await
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      return NextResponse.json(
+        { success: false, error: "Missing BLOB_READ_WRITE_TOKEN" },
+        { status: 500 }
+      );
+    }
+
+    const { id } = await context.params;
     if (!id) {
       return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
     }
 
-    const raw = await kv.get(`art:${id}`);
-    if (!raw) {
-      return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
-    }
-    const art = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
-
-    // Ambil token dari header atau body (kompatibel dengan client-mu)
+    // Ambil token dari header/body (kompatibel dgn client-mu)
     const headerToken =
       req.headers.get("x-owner-token") ||
       req.headers.get("x-delete-token") ||
       "";
 
     let bodyToken = "";
-    let metaUrlFromBody: string | undefined;
+    let metaUrlFromBody = "";
     try {
       const body = await req.json();
       bodyToken = body?.token || "";
-      metaUrlFromBody = body?.metaUrl;
+      metaUrlFromBody = body?.metaUrl || "";
     } catch {
       // body optional untuk DELETE
     }
+    const providedToken = headerToken || bodyToken;
 
-    const token = headerToken || bodyToken;
-    if (!token || token !== art.ownerTokenHash) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    // Butuh metaUrl untuk membaca metadata dari Blob
+    if (!metaUrlFromBody) {
+      return NextResponse.json(
+        { success: false, error: "Missing metaUrl" },
+        { status: 400 }
+      );
     }
 
-    // Hapus data utama
-    await kv.del(`art:${id}`);
+    // 1) Fetch metadata JSON dari Blob
+    const metaRes = await fetch(metaUrlFromBody, { cache: "no-store" });
+    if (!metaRes.ok) {
+      return NextResponse.json(
+        { success: false, error: "Not found" },
+        { status: 404 }
+      );
+    }
+    const meta = await metaRes.json();
 
-    // (Opsional) bersihkan turunan/caches sesuai skema kamu
-    await kv.del(`likes:${id}`).catch(() => {});
-    // contoh bersihkan index/ranking jika ada:
-    // await kv.zrem("idx:gallery", id).catch(() => {});
-    // await kv.zrem(`rank:daily:${someKey}`, id).catch(() => {});
-    // await kv.zrem(`rank:weekly:${someKey}`, id).catch(() => {});
-    // await kv.zrem(`rank:monthly:${someKey}`, id).catch(() => {});
+    // meta berisi: { id, title, x, discord, postUrl, imageUrl, createdAt, ownerTokenHash }
+    if (!meta?.id || meta.id !== id) {
+      return NextResponse.json(
+        { success: false, error: "Mismatched meta id" },
+        { status: 400 }
+      );
+    }
 
-    // (Opsional) hapus file meta/blob:
-    // const metaUrl = metaUrlFromBody || art.metaUrl;
-    // if (metaUrl) { ... }
+    // 2) Verifikasi kepemilikan
+    //   - Izinkan user kirim raw deleteToken (akan di-hash) ATAU langsung ownerTokenHash
+    const okAuth =
+      !!providedToken &&
+      (providedToken === meta.ownerTokenHash || sha256(providedToken) === meta.ownerTokenHash);
+
+    if (!okAuth) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    // 3) Hapus file di Blob: image + meta
+    const urlsToDelete: string[] = [];
+    if (meta.imageUrl) urlsToDelete.push(meta.imageUrl);
+    urlsToDelete.push(metaUrlFromBody);
+
+    await blobDel(urlsToDelete, {
+      token: process.env.BLOB_READ_WRITE_TOKEN!,
+    });
+
+    // (Jika kamu punya indeks/leaderboard di KV, bersihkan di sini.)
 
     return NextResponse.json({ success: true });
   } catch (e: any) {
