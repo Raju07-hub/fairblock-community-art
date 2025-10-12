@@ -23,60 +23,45 @@ function at(x?: string) {
   return x.startsWith("@") ? x : `@${x}`;
 }
 
-function getOwnerTokenFor(id: string): string | null {
+function readTokenMap(): Record<string, string> {
   try {
     const raw = localStorage.getItem("fairblock:tokens");
-    if (!raw) return null;
-    const map = JSON.parse(raw || "{}");
-    return map?.[id] || null;
-  } catch {
-    return null;
-  }
-}
-
-async function copyTextForce(text: string) {
-  if (!text) return false;
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-}
-
-// 🔄 Merge old token storages (legacy compatibility)
-function mergeLegacyTokens() {
-  try {
-    const merged: Record<string, string> = {};
-    const sources = ["fairblock:tokens", "fb:tokens", "gallery:tokens", "fairblock:deleteTokens"];
-    for (const key of sources) {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const obj = JSON.parse(raw);
-      if (obj && typeof obj === "object") {
-        for (const [id, token] of Object.entries(obj)) {
-          if (typeof id === "string" && typeof token === "string") merged[id] = token;
-        }
-      }
-    }
-    localStorage.setItem("fairblock:tokens", JSON.stringify(merged));
-    return merged;
+    return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
+}
+function saveTokenMap(map: Record<string, string>) {
+  try {
+    localStorage.setItem("fairblock:tokens", JSON.stringify(map));
+  } catch {}
+}
+
+// gabung semua storage lama → fairblock:tokens
+function mergeLegacyTokens() {
+  try {
+    const merged: Record<string, string> = { ...readTokenMap() };
+    const keys = ["fb:tokens", "gallery:tokens", "fairblock:deleteTokens"];
+    for (const k of keys) {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === "object") {
+        for (const [id, t] of Object.entries(obj)) {
+          if (typeof id === "string" && typeof t === "string") merged[id] = t;
+        }
+      }
+    }
+    saveTokenMap(merged);
+  } catch {}
+}
+
+// sha256 → hex (untuk cocokkan dengan ownerTokenHash)
+async function sha256Hex(input: string): Promise<string> {
+  const enc = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  const arr = Array.from(new Uint8Array(buf));
+  return arr.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export default function GalleryClient() {
@@ -86,7 +71,9 @@ export default function GalleryClient() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
+  const [ownerIds, setOwnerIds] = useState<Set<string>>(new Set());
 
+  // lightbox
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
@@ -114,10 +101,49 @@ export default function GalleryClient() {
       setLoading(false);
     }
   }
-
   useEffect(() => {
     load();
   }, []);
+
+  // tentukan kepemilikan: id -> token langsung ATAU hash(token) == ownerTokenHash
+  useEffect(() => {
+    (async () => {
+      const map = readTokenMap();
+      const tokens = Object.values(map);
+      // prehash semua token supaya cepat
+      const tokenHashes: Record<string, string> = {};
+      for (const t of tokens) {
+        try {
+          tokenHashes[t] = await sha256Hex(t);
+        } catch {}
+      }
+
+      const owned = new Set<string>();
+      let mutated = false;
+
+      for (const it of items) {
+        if (map[it.id]) {
+          owned.add(it.id);
+          continue;
+        }
+        if (!it.ownerTokenHash) continue;
+
+        // cari apakah ada token yg hash-nya sama
+        const match = Object.entries(tokenHashes).find(
+          ([, h]) => h === it.ownerTokenHash
+        );
+        if (match) {
+          const [tok] = match;
+          map[it.id] = tok; // simpan pemetaan baru agar persist
+          owned.add(it.id);
+          mutated = true;
+        }
+      }
+
+      if (mutated) saveTokenMap(map);
+      setOwnerIds(owned);
+    })();
+  }, [items]);
 
   async function toggleLike(it: GalleryItem) {
     const author = at(it.x) || at(it.discord);
@@ -137,7 +163,7 @@ export default function GalleryClient() {
       const q = query.trim().toLowerCase();
       list = list.filter((it) => [it.title, it.x, it.discord].join(" ").toLowerCase().includes(q));
     }
-    if (onlyMine) list = list.filter((it) => !!getOwnerTokenFor(it.id));
+    if (onlyMine) list = list.filter((it) => ownerIds.has(it.id));
     list = list
       .slice()
       .sort((a, b) =>
@@ -146,8 +172,9 @@ export default function GalleryClient() {
           : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
       );
     return list;
-  }, [items, query, onlyMine, sort]);
+  }, [items, query, onlyMine, sort, ownerIds]);
 
+  // --- Lightbox helpers
   function openAt(i: number) {
     setAnimDir(null);
     setSelectedIndex(i);
@@ -185,6 +212,7 @@ export default function GalleryClient() {
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10 relative">
+      {/* === Action bar === */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
@@ -237,16 +265,16 @@ export default function GalleryClient() {
             const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
             const openPost =
               it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl) ? it.postUrl : "";
-            const isOwner = !!getOwnerTokenFor(it.id);
+            const isOwner = ownerIds.has(it.id);
 
             return (
               <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
-                <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
+                {/* Wrapper seragam tinggi, gambar asli (contain) */}
+                <div className="relative cursor-pointer bg-black flex items-center justify-center" onClick={() => openAt(idx)} style={{ height: 240 }}>
                   <img
                     src={it.url}
                     alt={it.title}
-                    className="w-full object-contain bg-black transition-transform duration-300 hover:scale-[1.02]"
-                    style={{ maxHeight: "300px" }}
+                    className="max-h-full max-w-full object-contain transition-transform duration-300 hover:scale-[1.02]"
                   />
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleLike(it); }}
@@ -277,12 +305,33 @@ export default function GalleryClient() {
                     )}
                   </div>
 
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button className="btn px-3 py-1 text-xs" onClick={() => setQuery(xHandle || discordName || "")}>
+                      Search on Gallery
+                    </button>
+                    {openPost && (
+                      <a href={openPost} target="_blank" rel="noreferrer" className="btn px-3 py-1 text-xs">
+                        Open Art Post
+                      </a>
+                    )}
+                    <button
+                      className="btn px-3 py-1 text-xs"
+                      onClick={async () => {
+                        const ok = await copyTextForce(discordName || xHandle || "");
+                        alert(ok ? "Copied!" : "Copy failed.");
+                      }}
+                    >
+                      Copy Discord
+                    </button>
+                  </div>
+
                   {isOwner && (
                     <div className="mt-3 flex gap-2">
                       <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
                       <button
                         onClick={async () => {
-                          const token = getOwnerTokenFor(it.id);
+                          const map = readTokenMap();
+                          const token = map[it.id];
                           if (!token) return alert("Delete token not found. Use the same browser you used to submit.");
                           if (!confirm("Delete this artwork?")) return;
 
@@ -315,6 +364,111 @@ export default function GalleryClient() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* === Lightbox (tetap) */}
+      {selectedIndex !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={closeLightbox}
+        >
+          <div
+            className="relative max-w-4xl w-[80%] h-[80vh] flex flex-col items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className={[
+                "relative flex-1 w-full flex items-center justify-center transition-all duration-300",
+                enterPhase
+                  ? "opacity-100 translate-x-0"
+                  : animDir === "right"
+                  ? "opacity-0 translate-x-6"
+                  : animDir === "left"
+                  ? "opacity-0 -translate-x-6"
+                  : "opacity-0 translate-y-2",
+              ].join(" ")}
+            >
+              <img
+                src={filtered[selectedIndex].url}
+                alt={filtered[selectedIndex].title}
+                className="max-h-[70vh] w-auto rounded-xl shadow-2xl object-contain"
+              />
+
+              <button
+                className="absolute top-3 right-3 bg-white/20 hover:bg-white/30 rounded-full p-2"
+                onClick={closeLightbox}
+                aria-label="Close preview"
+              >
+                <X className="w-6 h-6 text-white" />
+              </button>
+
+              <button
+                className="absolute left-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
+                onClick={prevImage}
+                aria-label="Previous artwork"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <button
+                className="absolute right-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
+                onClick={nextImage}
+                aria-label="Next artwork"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
+
+            {(() => {
+              const sel = filtered[selectedIndex];
+              const xHandle = sel.x ? (sel.x.startsWith("@") ? sel.x : `@${sel.x}`) : "";
+              const discordName = (sel.discord || "").replace(/^@/, "");
+              const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
+              const openPost =
+                sel.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(sel.postUrl) ? sel.postUrl : "";
+
+              return (
+                <div
+                  className={[
+                    "w-full max-w-3xl mt-4 glass rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 transition-all duration-300",
+                    enterPhase ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+                  ].join(" ")}
+                >
+                  <div>
+                    <div className="font-semibold">{sel.title}</div>
+                    <div className="text-sm text-white/70 mt-1">
+                      {xHandle && (
+                        <a
+                          href={xUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline text-sky-300 hover:text-sky-200"
+                        >
+                          {xHandle}
+                        </a>
+                      )}
+                      {discordName && (
+                        <>
+                          <span> · </span>
+                          <span>{discordName}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {openPost && (
+                    <a
+                      href={openPost}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn px-4 py-1 text-sm"
+                    >
+                      Open Art Post ↗
+                    </a>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
     </div>
