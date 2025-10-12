@@ -65,25 +65,30 @@ export default function GalleryClient() {
   // lightbox
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
-  const [enterPhase, setEnterPhase] = useState(false); // untuk fade/slide-in
+  const [enterPhase, setEnterPhase] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const j = await fetch("/api/gallery", { cache: "no-store" }).then((r) => r.json());
+      const ts = Date.now();
+      const j = await fetch(`/api/gallery?ts=${ts}`, { cache: "no-store" }).then((r) => r.json());
       const list: GalleryItem[] = j?.items || [];
       setItems(list);
 
       if (list.length) {
         const ids = list.map((i) => i.id).join(",");
-        const liked = await fetch(`/api/likes?ids=${ids}`, { cache: "no-store" }).then((r) => r.json());
+        const liked = await fetch(`/api/likes?ids=${ids}&ts=${ts}`, { cache: "no-store" }).then((r) =>
+          r.json()
+        );
         setLikes(liked?.data || {});
       }
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   async function toggleLike(it: GalleryItem) {
     const author = at(it.x) || at(it.discord);
@@ -133,7 +138,6 @@ export default function GalleryClient() {
     setSelectedIndex((i) => (i! < filtered.length - 1 ? i! + 1 : 0));
   }
 
-  // ESC / panah kiri-kanan
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") closeLightbox();
@@ -144,7 +148,6 @@ export default function GalleryClient() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // trigger enter animation tiap kali index berubah
   useEffect(() => {
     if (selectedIndex === null) return;
     setEnterPhase(false);
@@ -292,7 +295,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* === Modal separuh layar + caption + Open Art Post + transisi slide/fade === */}
+      {/* === Lightbox separuh layar === */}
       {selectedIndex !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
@@ -302,7 +305,6 @@ export default function GalleryClient() {
             className="relative max-w-4xl w-[80%] h-[80vh] flex flex-col items-center justify-center"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Wrapper yang dianimasikan */}
             <div
               className={[
                 "relative flex-1 w-full flex items-center justify-center transition-all duration-300",
@@ -321,7 +323,6 @@ export default function GalleryClient() {
                 className="max-h-[70vh] w-auto rounded-xl shadow-2xl object-contain"
               />
 
-              {/* close */}
               <button
                 className="absolute top-3 right-3 bg-white/20 hover:bg-white/30 rounded-full p-2"
                 onClick={closeLightbox}
@@ -330,7 +331,6 @@ export default function GalleryClient() {
                 <X className="w-6 h-6 text-white" />
               </button>
 
-              {/* kiri kanan */}
               <button
                 className="absolute left-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
                 onClick={prevImage}

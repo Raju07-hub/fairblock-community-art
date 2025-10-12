@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { getOwnerToken } from "@/lib/storage"; // token global fbc_owner_token
+import { getOwnerToken } from "@/lib/storage";
 
 type Artwork = {
   id: string;
@@ -15,7 +15,6 @@ type Artwork = {
   postUrl?: string;
 };
 
-// --- LEGACY: baca token per-item dari localStorage "fairblock:tokens"
 function getLegacyTokenFor(id: string): string | null {
   try {
     const raw = localStorage.getItem("fairblock:tokens");
@@ -45,13 +44,12 @@ export default function EditArtworkPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load artwork by id
   useEffect(() => {
     if (!id) return;
     (async () => {
       setLoading(true);
       try {
-        const j = await fetch("/api/gallery", { cache: "no-store" }).then((r) => r.json());
+        const j = await fetch(`/api/gallery?ts=${Date.now()}`, { cache: "no-store" }).then((r) => r.json());
         const list: Artwork[] = j?.items || [];
         const found = list.find((a) => a.id === id) || null;
         if (!found) {
@@ -73,7 +71,6 @@ export default function EditArtworkPage() {
   async function onSave() {
     if (!item) return;
 
-    // 1) Coba token global (fbc_owner_token), 2) fallback ke token legacy per-item
     const tokenGlobal = getOwnerToken();
     const tokenLegacy = getLegacyTokenFor(item.id);
     const token = tokenGlobal || tokenLegacy;
@@ -113,7 +110,8 @@ export default function EditArtworkPage() {
       }
 
       alert("Saved successfully!");
-      router.push("/gallery");
+      // paksa gallery muat data baru
+      router.replace(`/gallery?refresh=${Date.now()}`);
     } catch (e: any) {
       alert(e?.message || "Failed to save");
     } finally {
