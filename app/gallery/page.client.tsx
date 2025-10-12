@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation"; // ← untuk menangkap ?select
 import { Heart, X, ChevronLeft, ChevronRight } from "lucide-react";
-import { useSearchParams } from "next/navigation"; // ⬅️ Tambahan
 
 type GalleryItem = {
   id: string;
@@ -249,6 +249,20 @@ export default function GalleryClient() {
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
 
+  // === tangkap ?select dan auto-scroll + highlight
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const sel = searchParams.get("select");
+    if (!sel) return;
+    const el = document.getElementById(`art-${sel}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-sky-400");
+      const t = setTimeout(() => el.classList.remove("ring-2", "ring-sky-400"), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [searchParams]);
+
   async function load() {
     setLoading(true);
     try {
@@ -344,34 +358,14 @@ export default function GalleryClient() {
     return () => clearTimeout(t);
   }, [selectedIndex]);
 
-  // ⬇️⬇️ Tambahan: auto-scroll + highlight kartu dari ?select=<id>
-  const searchParams = useSearchParams();
-  useEffect(() => {
-    const sel = searchParams.get("select");
-    if (!sel) return;
-    const el = document.getElementById(`art-${sel}`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("ring-2", "ring-sky-400");
-    const t = setTimeout(() => el.classList.remove("ring-2", "ring-sky-400"), 2500);
-    return () => clearTimeout(t);
-  }, [searchParams]);
-  // ⬆️⬆️ Tambahan selesai
-
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10 relative">
       {/* === Action bar === */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
-          <Link href="/" className="btn">
-            ⬅ Back Home
-          </Link>
-          <Link href="/submit" className="btn">
-            ＋ Submit Art
-          </Link>
-          <Link href="/leaderboard" className="btn">
-            🏆 Leaderboard
-          </Link>
+          <Link href="/" className="btn">⬅ Back Home</Link>
+          <Link href="/submit" className="btn">＋ Submit Art</Link>
+          <Link href="/leaderboard" className="btn">🏆 Leaderboard</Link>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -392,9 +386,7 @@ export default function GalleryClient() {
             Only My Uploads
           </label>
 
-          <button onClick={load} className="btn">
-            ↻ {loading ? "Refreshing…" : "Refresh"}
-          </button>
+          <button onClick={load} className="btn">↻ {loading ? "Refreshing…" : "Refresh"}</button>
         </div>
       </div>
 
@@ -416,8 +408,8 @@ export default function GalleryClient() {
 
             return (
               <div
-                id={`art-${it.id}`} // ⬅️ Tambahan: anchor supaya bisa diloncatin dari leaderboard
                 key={it.id}
+                id={`art-${it.id}`} // ← untuk auto-scroll/highlight dari leaderboard
                 className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]"
               >
                 <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
@@ -477,38 +469,27 @@ export default function GalleryClient() {
 
                   {isOwner && (
                     <div className="mt-3 flex gap-2">
-                      <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">
-                        ✏️ Edit
-                      </Link>
+                      <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
                       <button
                         onClick={async () => {
                           const token = getOwnerTokenFor(it.id);
                           if (!token) return alert("Delete token not found. Use the same browser you used to submit.");
                           if (!confirm("Delete this artwork?")) return;
-
                           try {
                             // Coba endpoint gaya baru: /api/art/:id (DELETE)
                             let res = await fetch(`/api/art/${it.id}`, {
                               method: "DELETE",
-                              headers: {
-                                "content-type": "application/json",
-                                "x-owner-token": token,
-                              },
+                              headers: { "content-type": "application/json", "x-owner-token": token },
                               body: JSON.stringify({ metaUrl: it.metaUrl }),
                             });
-
                             // Fallback ke endpoint lama: /api/delete (POST)
                             if (!res.ok) {
                               res = await fetch(`/api/delete?id=${encodeURIComponent(it.id)}`, {
                                 method: "POST",
-                                headers: {
-                                  "content-type": "application/json",
-                                  "x-owner-token": token,
-                                },
+                                headers: { "content-type": "application/json", "x-owner-token": token },
                                 body: JSON.stringify({ id: it.id, metaUrl: it.metaUrl }),
                               });
                             }
-
                             const j = await res.json().catch(() => null);
                             if (res.ok && j?.success) {
                               setItems((prev) => prev.filter((x) => x.id !== it.id));
