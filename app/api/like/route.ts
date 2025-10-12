@@ -17,7 +17,7 @@ const lastMonthlyKey = (uid: string, id: string) => `likes:lastMonthly:${uid}:${
 
 function lbKeys(day: string, week: string, month: string) {
   return {
-    artDaily:       `lb:art:daily:${day}`, // legacy (biar tidak merusak history lama)
+    artDaily:       `lb:art:daily:${day}`, // legacy, biarkan terisi
     artWeekly:      `lb:art:weekly:${week}`,
     artMonthly:     `lb:art:monthly:${month}`,
     creatorDaily:   `lb:creator:daily:${day}`,
@@ -40,9 +40,9 @@ export async function POST(req: NextRequest) {
   const userFlagKey = uKey(uid!, id);
   const alreadyLiked = ((await kv.get<number | null>(userFlagKey)) ?? 0) > 0;
 
-  const day = ymd();              // legacy
-  const week = weekSatUTC();      // <-- penting
-  const month = ym();             // <-- penting
+  const day = ymd();               // legacy
+  const week = weekSatUTC();       // weekly key Sabtu
+  const month = ym();              // monthly key
   const keys = lbKeys(day, week, month);
 
   let liked: boolean;

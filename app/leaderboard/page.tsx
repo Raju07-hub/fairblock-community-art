@@ -1,11 +1,10 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-type TopItem = { id: string; likes?: number; title?: string; owner?: string; discord?: string; postUrl?: string; url?: string; };
 type Scope = "weekly" | "monthly";
-
-type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; createdAt: string; metaUrl: string; postUrl?: string; };
+type TopItem = { id: string; score?: number; likes?: number; title?: string; owner?: string; discord?: string; postUrl?: string; url?: string; };
+type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; metaUrl?: string; postUrl?: string };
 
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("weekly");
@@ -23,7 +22,7 @@ export default function LeaderboardPage() {
     try {
       const r = await fetch(`/api/leaderboard?range=${scope}`, { cache: "no-store" });
       const j = await r.json();
-      setTopArts(j?.topArts || j?.top_art || []);
+      setTopArts((j?.topArts || []).map((x: any) => ({ id: x.id, likes: x.score })));
     } finally {
       setLoading(false);
     }
@@ -36,21 +35,38 @@ export default function LeaderboardPage() {
     } catch {}
   }
 
-  useEffect(() => { loadLB(); /* eslint-disable-next-line */ }, [scope]);
   useEffect(() => { loadGallery(); }, []);
+  useEffect(() => { loadLB(); /* eslint-disable-next-line */ }, [scope]);
 
-  const resetLabel =
-    scope === "weekly"
-      ? "Weekly reset: every Saturday at 07:00 UTC+7 (00:00 UTC)"
-      : "Monthly reset: on the 1st at 07:00 UTC+7";
+  // realtime polling 10s
+  useEffect(() => {
+    const t = setInterval(loadLB, 10000);
+    return () => clearInterval(t);
+  }, [scope]);
 
-  // ==== compute top creators by uploads ====
+  // join metadata
+  const rows = useMemo(() => {
+    const map = new Map(gallery.map(g => [g.id, g]));
+    return topArts.map(t => {
+      const g = map.get(t.id);
+      return {
+        ...t,
+        title: g?.title || t.title || "Untitled",
+        url: g?.url || t.url,
+        owner: g?.x || t.owner,
+        discord: g?.discord || t.discord,
+        postUrl: g?.postUrl || t.postUrl,
+      };
+    });
+  }, [topArts, gallery]);
+
+  // creators by uploads
   const topCreators = useMemo(() => {
     const map = new Map<string, number>();
     for (const it of gallery) {
-      const h = (it.x || "").trim();
-      if (!h) continue;
-      const key = h.startsWith("@") ? h : `@${h}`;
+      const handle = (it.x || "").trim();
+      if (!handle) continue;
+      const key = handle.startsWith("@") ? handle : `@${handle}`;
       map.set(key, (map.get(key) || 0) + 1);
     }
     return Array.from(map.entries())
@@ -58,6 +74,11 @@ export default function LeaderboardPage() {
       .sort((a, b) => b.uploads - a.uploads)
       .slice(0, 10);
   }, [gallery]);
+
+  const resetLabel =
+    scope === "weekly"
+      ? "Weekly reset: every Saturday at 07:00 UTC+7 (00:00 UTC)"
+      : "Monthly reset: on the 1st at 07:00 UTC+7";
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
@@ -74,7 +95,9 @@ export default function LeaderboardPage() {
             <button className={pill(scope === "weekly")} onClick={() => setScope("weekly")}>Weekly</button>
             <button className={pill(scope === "monthly")} onClick={() => setScope("monthly")}>Monthly</button>
           </div>
-          <button onClick={loadLB} className={btn} disabled={loading}>↻ {loading ? "Refreshing…" : "Refresh"}</button>
+          <button onClick={loadLB} className={btn} disabled={loading}>
+            ↻ {loading ? "Refreshing…" : "Refresh"}
+          </button>
         </div>
       </div>
 
@@ -82,11 +105,11 @@ export default function LeaderboardPage() {
         <p className="opacity-70">Loading…</p>
       ) : (
         <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.2fr)_minmax(0,1fr)] gap-6">
-          {/* Left: Top Art */}
+          {/* Top Art */}
           <section>
             <h2 className={heading}>🏆 Top Art ({scope.toUpperCase()})</h2>
             <div className="space-y-3">
-              {topArts.slice(0, 10).map((t, idx) => {
+              {rows.slice(0, 10).map((t, idx) => {
                 const title = t.title ?? "Untitled";
                 const xHandle = t.owner || "";
                 const discord = t.discord || "";
@@ -116,11 +139,11 @@ export default function LeaderboardPage() {
                   </div>
                 );
               })}
-              {!topArts?.length && <div className="opacity-70">No data for this period yet.</div>}
+              {!rows?.length && <div className="opacity-70">No data for this period yet.</div>}
             </div>
           </section>
 
-          {/* Right: Top Creators by uploads */}
+          {/* Top Creators */}
           <section>
             <h2 className={heading}>🧬 Top Creators (by uploads)</h2>
             <div className="space-y-3">

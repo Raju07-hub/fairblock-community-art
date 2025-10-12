@@ -14,7 +14,7 @@ function toPairs(a: any[]) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const range = (searchParams.get("range") || "weekly").toLowerCase();
+    const range = (searchParams.get("range") || "weekly").toLowerCase(); // weekly | monthly
 
     let key: string;
     if (range === "weekly") key = `lb:art:weekly:${weekSatUTC()}`;
