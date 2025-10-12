@@ -5,11 +5,12 @@ import Link from "next/link";
 type Scope = "weekly" | "monthly";
 type TopItem = {
   id: string;
+  score?: number;
   likes?: number;
   title?: string;
-  owner?: string;   // @handle
+  owner?: string;
   discord?: string;
-  postUrl?: string; // X/Twitter art post
+  postUrl?: string;
   url?: string;
 };
 type GalleryItem = {
@@ -28,9 +29,11 @@ export default function LeaderboardPage() {
   const [topArts, setTopArts] = useState<TopItem[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
 
-  const pill = (active: boolean) => `btn px-4 py-1 rounded-full text-sm ${active ? "bg-[#3aaefc]/30" : "bg-white/10"}`;
+  const pill = (active: boolean) =>
+    `btn px-4 py-1 rounded-full text-sm ${active ? "bg-[#3aaefc]/30" : "bg-white/10"}`;
   const btn = "btn px-4 py-1 rounded-full text-sm";
-  const badge = "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
+  const badge =
+    "px-3 py-1 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]";
   const heading = "text-2xl font-bold mb-3 text-[#3aaefc]";
 
   async function loadLB() {
@@ -38,7 +41,7 @@ export default function LeaderboardPage() {
     try {
       const r = await fetch(`/api/leaderboard?range=${scope}`, { cache: "no-store" });
       const j = await r.json();
-      setTopArts(j?.topArts || []);
+      setTopArts((j?.topArts || []).map((x: any) => ({ id: x.id, likes: x.score })));
     } finally {
       setLoading(false);
     }
@@ -51,14 +54,42 @@ export default function LeaderboardPage() {
     } catch {}
   }
 
-  useEffect(() => { loadGallery(); }, []);
-  useEffect(() => { loadLB(); }, [scope]);
+  useEffect(() => {
+    loadGallery();
+  }, []);
+  useEffect(() => {
+    loadLB();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   // realtime polling 10s
-  useEffect(() => { const t = setInterval(loadLB, 10000); return () => clearInterval(t); }, [scope]);
+  useEffect(() => {
+    const t = setInterval(loadLB, 10000);
+    return () => clearInterval(t);
+  }, [scope]);
 
-  // creators by uploads dari /api/gallery (client side)
-  const topCreatorsUploads = useMemo(() => {
+  // JOIN metadata + buang yang tidak punya url (metadata hilang / file dihapus)
+  const rows = useMemo(() => {
+    const map = new Map(gallery.map((g) => [g.id, g]));
+    return topArts
+      .map((t) => {
+        const g = map.get(t.id);
+        return g
+          ? {
+              ...t,
+              title: g.title || t.title || "Untitled",
+              url: g.url, // pastikan ada url
+              owner: g.x || t.owner,
+              discord: g.discord || t.discord,
+              postUrl: g.postUrl || t.postUrl,
+            }
+          : null;
+      })
+      .filter(Boolean) as TopItem[];
+  }, [topArts, gallery]);
+
+  // creators by uploads (kanan)
+  const topCreators = useMemo(() => {
     const map = new Map<string, number>();
     for (const it of gallery) {
       const handle = (it.x || "").trim();
@@ -81,16 +112,28 @@ export default function LeaderboardPage() {
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div className="flex gap-3">
-          <Link href="/" className="btn">⬅ Back Home</Link>
-          <Link href="/gallery" className="btn">🖼️ Gallery</Link>
-          <Link href="/submit" className="btn">＋ Submit</Link>
-          <Link href="/history" className="btn">🗂 History</Link>
+          <Link href="/" className="btn">
+            ⬅ Back Home
+          </Link>
+          <Link href="/gallery" className="btn">
+            🖼️ Gallery
+          </Link>
+          <Link href="/submit" className="btn">
+            ＋ Submit
+          </Link>
+          <Link href="/history" className="btn">
+            🗂 History
+          </Link>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs opacity-70">{resetLabel}</span>
           <div className="flex gap-2">
-            <button className={pill(scope === "weekly")} onClick={() => setScope("weekly")}>Weekly</button>
-            <button className={pill(scope === "monthly")} onClick={() => setScope("monthly")}>Monthly</button>
+            <button className={pill(scope === "weekly")} onClick={() => setScope("weekly")}>
+              Weekly
+            </button>
+            <button className={pill(scope === "monthly")} onClick={() => setScope("monthly")}>
+              Monthly
+            </button>
           </div>
           <button onClick={loadLB} className={btn} disabled={loading}>
             ↻ {loading ? "Refreshing…" : "Refresh"}
@@ -102,21 +145,17 @@ export default function LeaderboardPage() {
         <p className="opacity-70">Loading…</p>
       ) : (
         <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.2fr)_minmax(0,1fr)] gap-6">
-          {/* 🏆 Top Art */}
+          {/* Top Art */}
           <section>
             <h2 className={heading}>🏆 Top Art ({scope.toUpperCase()})</h2>
             <div className="space-y-3">
-              {topArts.slice(0, 10).map((t, idx) => {
+              {rows.slice(0, 10).map((t, idx) => {
                 const title = t.title ?? "Untitled";
                 const xHandle = t.owner || "";
                 const discord = t.discord || "";
-
-                // Link ke kartu gallery: query ?select=ID + anchor #art-ID
-                const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}#art-${encodeURIComponent(t.id)}`;
-
-                const xProfile = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
-                const postUrl = t.postUrl || ""; // dari /api/leaderboard (enriched dari /api/gallery)
-
+                const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
+                const postUrl =
+                  t.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(t.postUrl) ? t.postUrl : "";
                 return (
                   <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
                     <div className="flex items-center gap-4 min-w-0">
@@ -134,15 +173,18 @@ export default function LeaderboardPage() {
                       <div className="min-w-0">
                         <div className="font-medium truncate text-base">{title}</div>
                         <div className="mt-1 text-sm opacity-80 space-x-2">
-                          {xHandle && <a className="underline hover:opacity-90" href={xProfile} target="_blank" rel="noopener noreferrer">{xHandle}</a>}
+                          {xHandle && <span className="opacity-90">{xHandle}</span>}
                           {discord && <span className="opacity-70">· {discord}</span>}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
-                          {postUrl
-                            ? <a href={postUrl} target="_blank" rel="noreferrer" className={btn}>Open X Art Post</a>
-                            : (xHandle && <a href={xProfile} target="_blank" rel="noreferrer" className={btn}>Open X Profile</a>)
-                          }
+                          <Link href={seeOnGallery} className={btn}>
+                            See on Gallery
+                          </Link>
+                          {postUrl && (
+                            <a href={postUrl} target="_blank" rel="noreferrer" className={btn}>
+                              Open X Art Post
+                            </a>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -150,28 +192,31 @@ export default function LeaderboardPage() {
                   </div>
                 );
               })}
-              {!topArts?.length && <div className="opacity-70">No data for this period yet.</div>}
+              {!rows?.length && <div className="opacity-70">No data for this period yet.</div>}
             </div>
           </section>
 
-          {/* 👨‍🎨 Top Creators by Uploads */}
+          {/* Top Creators */}
           <section>
             <h2 className={heading}>🧬 Top Creators (by uploads)</h2>
             <div className="space-y-3">
-              {topCreatorsUploads.map((c, idx) => {
-                const user = c.user;
-                const galleryLink = `/gallery?q=${encodeURIComponent(user)}`;
-                const xUrl = `https://x.com/${user.replace(/^@/, "")}`;
+              {topCreators.map((c, idx) => {
+                const galleryLink = `/gallery?q=${encodeURIComponent(c.user)}`;
+                const xUrl = `https://x.com/${c.user.replace(/^@/, "")}`;
                 return (
-                  <div key={user} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
+                  <div key={c.user} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="w-6 text-center opacity-70 text-sm">{idx + 1}.</span>
                       <div className="min-w-0">
-                        <div className="font-medium truncate text-[15px]">{user}</div>
+                        <div className="font-medium truncate text-[15px]">{c.user}</div>
                         <div className="text-xs opacity-60">Uploads: {c.uploads}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <Link href={galleryLink} className="btn px-3 py-1 rounded-full text-xs">Search on Gallery</Link>
-                          <a href={xUrl} target="_blank" rel="noreferrer" className="btn px-3 py-1 rounded-full text-xs">Open X Profile</a>
+                          <Link href={galleryLink} className="btn px-3 py-1 rounded-full text-xs">
+                            Search on Gallery
+                          </Link>
+                          <a href={xUrl} target="_blank" rel="noreferrer" className="btn px-3 py-1 rounded-full text-xs">
+                            Open X Profile
+                          </a>
                         </div>
                       </div>
                     </div>
@@ -181,7 +226,7 @@ export default function LeaderboardPage() {
                   </div>
                 );
               })}
-              {!topCreatorsUploads.length && <div className="opacity-70">No creators yet.</div>}
+              {!topCreators.length && <div className="opacity-70">No creators yet.</div>}
             </div>
           </section>
         </div>
