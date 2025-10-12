@@ -1,10 +1,10 @@
+// app/gallery/page.client.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Heart, X, ChevronLeft, ChevronRight } from "lucide-react";
 
-/* ===================== Types ===================== */
 type GalleryItem = {
   id: string;
   title: string;
@@ -14,67 +14,117 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
-  // meta baru menyimpan ownerTokenHash; tapi item lama mungkin belum punya (aman, kita fallback id->token)
-  ownerTokenHash?: string;
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
 
-/* ===================== Utils ===================== */
 function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
 }
 
-// Kunci-kunci lama yang pernah dipakai di berbagai versi
-const LEGACY_KEYS = [
-  "fairblock:tokens",
-  "fairblock:deleteTokens",
-  "gallery:tokens",
-  "fb:tokens",
-] as const;
-
-type TokenMap = Record<string, string>; // id -> token
-
-// Gabungkan semua format lama (bisa object map, array tuple, atau array object)
-function readAllLegacyTokens(): TokenMap {
-  const out: TokenMap = {};
-  for (const k of LEGACY_KEYS) {
-    try {
-      const raw = localStorage.getItem(k);
-      if (!raw) continue;
-      const obj = JSON.parse(raw);
-      if (!obj || typeof obj !== "object") continue;
-
-      if (Array.isArray(obj)) {
-        for (const it of obj) {
-          // format [id, token]
-          if (Array.isArray(it) && it[0] && it[1]) out[String(it[0])] = String(it[1]);
-          // format { id, token }
-          if (it && typeof it === "object" && it.id && it.token) out[String(it.id)] = String(it.token);
-        }
-      } else {
-        // format { [id]: token }
-        for (const [id, t] of Object.entries(obj)) {
-          if (t) out[String(id)] = String(t);
-        }
-      }
-    } catch {
-      // ignore
-    }
+/* ====== TOKEN STORAGE (compat) ====== */
+function readTokenMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem("fairblock:tokens");
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
   }
-  return out;
 }
 
-// SHA-256 string → hex (untuk cocokkan ownerTokenHash)
-async function sha256Hex(input: string): Promise<string> {
-  const enc = new TextEncoder();
-  const buf = await crypto.subtle.digest("SHA-256", enc.encode(input));
+function writeTokenMap(map: Record<string, string>) {
+  try {
+    localStorage.setItem("fairblock:tokens", JSON.stringify(map));
+  } catch {}
+}
+
+function getOwnerTokenFor(id: string): string | null {
+  const m = readTokenMap();
+  return m[id] || null;
+}
+
+/* ====== CRYPTO ====== */
+async function sha256Hex(str: string): Promise<string> {
+  const enc = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
   const arr = Array.from(new Uint8Array(buf));
   return arr.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// Salin ke clipboard (fallback textarea bila perlu)
+/**
+ * Rebind otomatis: pakai token lama (tanpa id) → hashing,
+ * lalu cocokkan dengan ownerTokenHash di meta setiap karya.
+ * Jika cocok, simpan map id -> token ke `fairblock:tokens`.
+ */
+async function rebindLegacyTokens(items: GalleryItem[]) {
+  // 1) Ambil seluruh token lama (bisa format {id: token} lama, atau list acak yang disatukan)
+  const buckets = [
+    "fairblock:tokens",
+    "gallery:tokens",
+    "fb:tokens",
+    "fairblock:deleteTokens",
+  ];
+
+  const candidates = new Set<string>();
+  for (const key of buckets) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === "object") {
+        if (Array.isArray(obj)) {
+          for (const it of obj) {
+            if (Array.isArray(it) && it[1]) candidates.add(String(it[1]));
+            else if (it && typeof it === "object" && it.token) candidates.add(String(it.token));
+          }
+        } else {
+          for (const [k, v] of Object.entries(obj)) {
+            // kalau map id->token lama, ambil tokennya
+            candidates.add(String(v as any));
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (!candidates.size) return; // tidak ada yang bisa direbind
+
+  // Hash semua kandidat agar bisa dibandingkan cepat
+  const tokenList = Array.from(candidates);
+  const hashes = await Promise.all(tokenList.map((t) => sha256Hex(t)));
+  const hashToToken = new Map<string, string>();
+  hashes.forEach((h, i) => hashToToken.set(h, tokenList[i]));
+
+  // 2) Ambil map saat ini (biar tidak overwrite yang sudah ada)
+  const now = readTokenMap();
+  let changed = false;
+
+  // 3) Loop karya, fetch meta & cocokkan
+  for (const it of items) {
+    if (!it.metaUrl) continue;
+    if (now[it.id]) continue; // sudah ada
+
+    try {
+      const res = await fetch(`${it.metaUrl}?v=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) continue;
+      const meta = await res.json();
+      const h = String(meta?.ownerTokenHash || "");
+      if (!h) continue;
+
+      const matched = hashToToken.get(h);
+      if (matched) {
+        now[it.id] = matched;
+        changed = true;
+      }
+    } catch {
+      // skip satu item kalau gagal
+    }
+  }
+
+  if (changed) writeTokenMap(now);
+}
+
 async function copyTextForce(text: string) {
   if (!text) return false;
   try {
@@ -98,7 +148,6 @@ async function copyTextForce(text: string) {
   }
 }
 
-/* ===================== Component ===================== */
 export default function GalleryClient() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [likes, setLikes] = useState<LikeMap>({});
@@ -112,40 +161,18 @@ export default function GalleryClient() {
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
 
-  // kepemilikan (otomat dari browser yang sama)
-  const [ownerIdMap, setOwnerIdMap] = useState<TokenMap>({}); // id -> token (versi lama)
-  const [ownerHashSet, setOwnerHashSet] = useState<Set<string>>(new Set()); // sha256(token)
-
-  // Siapkan token dari localStorage lama + hash-nya, jalankan sekali
-  useEffect(() => {
-    (async () => {
-      const merged = readAllLegacyTokens(); // gabungkan semua versi
-      setOwnerIdMap(merged);
-
-      // siapkan hash token untuk verifikasi terhadap ownerTokenHash
-      const hashes = new Set<string>();
-      for (const t of Object.values(merged)) {
-        try {
-          const h = await sha256Hex(String(t));
-          hashes.add(h);
-        } catch {
-          /* noop */
-        }
-      }
-      setOwnerHashSet(hashes);
-    })();
-  }, []);
-
   async function load() {
     setLoading(true);
     try {
       const ts = Date.now();
       const j = await fetch(`/api/gallery?ts=${ts}`, { cache: "no-store" }).then((r) => r.json());
-      const list: GalleryItem[] = (j?.items || []).map((it: any) => ({
-        ...it,
-        ownerTokenHash: it?.ownerTokenHash, // jika ada di meta baru, kita manfaatkan
-      }));
+      const list: GalleryItem[] = j?.items || [];
       setItems(list);
+
+      // 🔁 Rebind otomatis (sekali saat page load)
+      try {
+        await rebindLegacyTokens(list);
+      } catch {}
 
       if (list.length) {
         const ids = list.map((i) => i.id).join(",");
@@ -162,33 +189,6 @@ export default function GalleryClient() {
     load();
   }, []);
 
-  // cek kepemilikan: id->token (lama) ATAU hash(token) == ownerTokenHash
-  const isOwner = (it: GalleryItem): boolean => {
-    if (!it?.id) return false;
-    // 1) lama: punya token untuk id ini
-    if (ownerIdMap[it.id]) return true;
-    // 2) baru: cocokkan hash
-    if (it.ownerTokenHash && ownerHashSet.has(it.ownerTokenHash)) return true;
-    return false;
-  };
-
-  const filtered = useMemo(() => {
-    let list = items;
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      list = list.filter((it) => [it.title, it.x, it.discord].join(" ").toLowerCase().includes(q));
-    }
-    if (onlyMine) list = list.filter((it) => isOwner(it));
-    list = list
-      .slice()
-      .sort((a, b) =>
-        sort === "newest"
-          ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-      );
-    return list;
-  }, [items, query, onlyMine, sort, ownerIdMap, ownerHashSet]);
-
   async function toggleLike(it: GalleryItem) {
     const author = at(it.x) || at(it.discord);
     const j = await fetch("/api/like", {
@@ -200,6 +200,23 @@ export default function GalleryClient() {
       setLikes((prev) => ({ ...prev, [it.id]: { count: j.count ?? 0, liked: !!j.liked } }));
     }
   }
+
+  const filtered = useMemo(() => {
+    let list = items;
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter((it) => [it.title, it.x, it.discord].join(" ").toLowerCase().includes(q));
+    }
+    if (onlyMine) list = list.filter((it) => !!getOwnerTokenFor(it.id));
+    list = list
+      .slice()
+      .sort((a, b) =>
+        sort === "newest"
+          ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+    return list;
+  }, [items, query, onlyMine, sort]);
 
   // --- Lightbox helpers
   function openAt(i: number) {
@@ -282,7 +299,16 @@ export default function GalleryClient() {
       {loading ? (
         <p className="opacity-70">Loading…</p>
       ) : filtered.length === 0 ? (
-        <p className="opacity-70">No artworks found.</p>
+        <div className="opacity-80 space-y-2">
+          <p>No artworks found.</p>
+          {onlyMine && (
+            <p className="text-sm">
+              Kamu mengaktifkan <b>Only My Uploads</b>. Jika upload lama tidak muncul (mis. dari
+              deploy lama), cukup buka kembali galeri ini di browser yang sama — sistem akan
+              otomatis mendeteksi kepemilikan tanpa perlu klaim.
+            </p>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
           {filtered.map((it, idx) => {
@@ -292,7 +318,7 @@ export default function GalleryClient() {
             const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
             const openPost =
               it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl) ? it.postUrl : "";
-            const owner = isOwner(it);
+            const isOwner = !!getOwnerTokenFor(it.id);
 
             return (
               <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
@@ -352,16 +378,13 @@ export default function GalleryClient() {
                     </button>
                   </div>
 
-                  {owner && (
+                  {isOwner && (
                     <div className="mt-3 flex gap-2">
                       <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
                       <button
                         onClick={async () => {
-                          const directToken = ownerIdMap[it.id] || ""; // untuk DELETE kirim via header/atau body (server juga terima hash)
-                          if (!directToken && !it.ownerTokenHash) {
-                            alert("Delete token not found in this browser.");
-                            return;
-                          }
+                          const token = getOwnerTokenFor(it.id);
+                          if (!token) return alert("Delete token not found. Use the same browser you used to submit.");
                           if (!confirm("Delete this artwork?")) return;
 
                           try {
@@ -369,7 +392,7 @@ export default function GalleryClient() {
                               method: "DELETE",
                               headers: {
                                 "content-type": "application/json",
-                                ...(directToken ? { "x-owner-token": directToken } : {}),
+                                "x-owner-token": token,
                               },
                               body: JSON.stringify({ metaUrl: it.metaUrl }),
                             });
@@ -448,7 +471,6 @@ export default function GalleryClient() {
               </button>
             </div>
 
-            {/* Caption + tombol Open Art Post */}
             {(() => {
               const sel = filtered[selectedIndex];
               const xHandle = sel.x ? (sel.x.startsWith("@") ? sel.x : `@${sel.x}`) : "";
