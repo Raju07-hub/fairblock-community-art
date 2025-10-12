@@ -107,11 +107,16 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
     };
 
     // overwrite meta JSON di key deterministik
-    await blobPut(`fairblock/meta/${id}.json`, Buffer.from(JSON.stringify(nextMeta)), {
-      access: "public",
-      contentType: "application/json",
-      token: process.env.BLOB_READ_WRITE_TOKEN!,
-    });
+    await blobPut(
+  `fairblock/meta/${id}.json`,
+  Buffer.from(JSON.stringify(nextMeta)),
+  {
+    access: "public",
+    contentType: "application/json",
+    token: process.env.BLOB_READ_WRITE_TOKEN!,
+    allowOverwrite: true,        // ← WAJIB untuk overwrite file yang sama
+  }
+);
 
     return NextResponse.json({ success: true, meta: nextMeta });
   } catch (e: any) {
