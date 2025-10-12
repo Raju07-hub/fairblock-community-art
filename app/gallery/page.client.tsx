@@ -62,7 +62,6 @@ export default function GalleryClient() {
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
-  // lightbox
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
@@ -119,7 +118,6 @@ export default function GalleryClient() {
     return list;
   }, [items, query, onlyMine, sort]);
 
-  // --- Lightbox helpers
   function openAt(i: number) {
     setAnimDir(null);
     setSelectedIndex(i);
@@ -213,14 +211,21 @@ export default function GalleryClient() {
             const isOwner = !!getOwnerTokenFor(it.id);
 
             return (
-              <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
+              <div
+                key={it.id}
+                className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]"
+              >
                 <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
-                  <img
-                    src={it.url}
-                    alt={it.title}
-                    className="w-full aspect-[4/3] object-cover transition-transform duration-300 hover:scale-105"
-                  />
+                  <div className="w-full aspect-[4/3] bg-black/10 flex items-center justify-center overflow-hidden">
+                    <img
+                      src={it.url}
+                      alt={it.title}
+                      className="max-w-full max-h-full w-auto h-auto object-contain"
+                    />
+                  </div>
+
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
+
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleLike(it); }}
                     aria-pressed={like.liked}
@@ -284,9 +289,9 @@ export default function GalleryClient() {
                               method: "DELETE",
                               headers: {
                                 "content-type": "application/json",
-                                "x-owner-token": token, // kirim via header
+                                "x-owner-token": token,
                               },
-                              body: JSON.stringify({ metaUrl: it.metaUrl }), // optional
+                              body: JSON.stringify({ metaUrl: it.metaUrl }),
                             });
                             const j = await res.json();
                             if (j?.success) {
@@ -311,7 +316,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* === Lightbox separuh layar === */}
+      {/* === Lightbox === */}
       {selectedIndex !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
@@ -363,7 +368,7 @@ export default function GalleryClient() {
               </button>
             </div>
 
-            {/* Caption + tombol Open Art Post */}
+            {/* Caption */}
             {(() => {
               const sel = filtered[selectedIndex];
               const xHandle = sel.x ? (sel.x.startsWith("@") ? sel.x : `@${sel.x}`) : "";
