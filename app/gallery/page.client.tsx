@@ -13,7 +13,7 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
-  ownerTokenHash?: string;
+  ownerTokenHash?: string; // ← new
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
@@ -22,46 +22,109 @@ function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
 }
-
-function readTokenMap(): Record<string, string> {
+function getOwnerTokenFor(id: string): string | null {
   try {
     const raw = localStorage.getItem("fairblock:tokens");
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return null;
+    const map = JSON.parse(raw || "{}");
+    return map?.[id] || null;
   } catch {
-    return {};
+    return null;
   }
 }
-function saveTokenMap(map: Record<string, string>) {
+async function copyTextForce(text: string) {
+  if (!text) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Hash helper (hex, sama seperti server sha256) */
+async function sha256Hex(input: string) {
+  const enc = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  const arr = Array.from(new Uint8Array(buf));
+  return arr.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Gabung semua kemungkinan storage lama jadi 1 map {idOrKey: token} */
+function readAllLegacyTokenMaps(): Record<string, string> {
+  const keys = ["fairblock:tokens", "fb:tokens", "gallery:tokens", "fairblock:deleteTokens"];
+  const out: Record<string, string> = {};
+  for (const k of keys) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== "object") continue;
+
+      if (Array.isArray(obj)) {
+        for (const it of obj) {
+          if (Array.isArray(it) && it[0] && it[1]) out[String(it[0])] = String(it[1]);
+          else if (it && typeof it === "object" && it.id && it.token) out[String(it.id)] = String(it.token);
+        }
+      } else {
+        for (const [id, t] of Object.entries(obj)) out[String(id)] = String(t as any);
+      }
+    } catch {}
+  }
+  return out;
+}
+
+/** Simpan map final owner tokens hanya ke key baru "fairblock:tokens" */
+function writeOwnerMap(map: Record<string, string>) {
   try {
     localStorage.setItem("fairblock:tokens", JSON.stringify(map));
   } catch {}
 }
 
-// gabung semua storage lama → fairblock:tokens
-function mergeLegacyTokens() {
-  try {
-    const merged: Record<string, string> = { ...readTokenMap() };
-    const keys = ["fb:tokens", "gallery:tokens", "fairblock:deleteTokens"];
-    for (const k of keys) {
-      const raw = localStorage.getItem(k);
-      if (!raw) continue;
-      const obj = JSON.parse(raw);
-      if (obj && typeof obj === "object") {
-        for (const [id, t] of Object.entries(obj)) {
-          if (typeof id === "string" && typeof t === "string") merged[id] = t;
-        }
-      }
-    }
-    saveTokenMap(merged);
-  } catch {}
-}
+/** Auto-rebind: cocokan token lama (by hash) ke item yang tampil */
+async function autoRebindLegacyTokens(items: GalleryItem[]) {
+  if (typeof window === "undefined" || !items?.length) return;
 
-// sha256 → hex (untuk cocokkan dengan ownerTokenHash)
-async function sha256Hex(input: string): Promise<string> {
-  const enc = new TextEncoder().encode(input);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  const arr = Array.from(new Uint8Array(buf));
-  return arr.map((b) => b.toString(16).padStart(2, "0")).join("");
+  // ambil map saat ini & semua kandidat token lama
+  let current: Record<string, string> = {};
+  try { current = JSON.parse(localStorage.getItem("fairblock:tokens") || "{}"); } catch {}
+
+  const candidates = readAllLegacyTokenMaps();
+  const candidateList = Object.values(candidates).filter(Boolean);
+  if (!candidateList.length) return;
+
+  // Buat lookup hash => token (biar hash sekali per token)
+  const hashToToken: Record<string, string> = {};
+  await Promise.all(candidateList.map(async (tok) => {
+    const h = await sha256Hex(tok);
+    hashToToken[h] = tok;
+  }));
+
+  // Cocokkan per item (yang belum punya token)
+  let changed = false;
+  for (const it of items) {
+    if (!it.ownerTokenHash || current[it.id]) continue;
+    const token = hashToToken[it.ownerTokenHash];
+    if (token) {
+      current[it.id] = token;
+      changed = true;
+    }
+  }
+
+  if (changed) writeOwnerMap(current);
 }
 
 export default function GalleryClient() {
@@ -71,16 +134,11 @@ export default function GalleryClient() {
   const [onlyMine, setOnlyMine] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
-  const [ownerIds, setOwnerIds] = useState<Set<string>>(new Set());
 
   // lightbox
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
-
-  useEffect(() => {
-    mergeLegacyTokens();
-  }, []);
 
   async function load() {
     setLoading(true);
@@ -89,6 +147,9 @@ export default function GalleryClient() {
       const j = await fetch(`/api/gallery?ts=${ts}`, { cache: "no-store" }).then((r) => r.json());
       const list: GalleryItem[] = j?.items || [];
       setItems(list);
+
+      // 🔁 rebind token lama -> id baru
+      await autoRebindLegacyTokens(list);
 
       if (list.length) {
         const ids = list.map((i) => i.id).join(",");
@@ -104,46 +165,6 @@ export default function GalleryClient() {
   useEffect(() => {
     load();
   }, []);
-
-  // tentukan kepemilikan: id -> token langsung ATAU hash(token) == ownerTokenHash
-  useEffect(() => {
-    (async () => {
-      const map = readTokenMap();
-      const tokens = Object.values(map);
-      // prehash semua token supaya cepat
-      const tokenHashes: Record<string, string> = {};
-      for (const t of tokens) {
-        try {
-          tokenHashes[t] = await sha256Hex(t);
-        } catch {}
-      }
-
-      const owned = new Set<string>();
-      let mutated = false;
-
-      for (const it of items) {
-        if (map[it.id]) {
-          owned.add(it.id);
-          continue;
-        }
-        if (!it.ownerTokenHash) continue;
-
-        // cari apakah ada token yg hash-nya sama
-        const match = Object.entries(tokenHashes).find(
-          ([, h]) => h === it.ownerTokenHash
-        );
-        if (match) {
-          const [tok] = match;
-          map[it.id] = tok; // simpan pemetaan baru agar persist
-          owned.add(it.id);
-          mutated = true;
-        }
-      }
-
-      if (mutated) saveTokenMap(map);
-      setOwnerIds(owned);
-    })();
-  }, [items]);
 
   async function toggleLike(it: GalleryItem) {
     const author = at(it.x) || at(it.discord);
@@ -163,7 +184,7 @@ export default function GalleryClient() {
       const q = query.trim().toLowerCase();
       list = list.filter((it) => [it.title, it.x, it.discord].join(" ").toLowerCase().includes(q));
     }
-    if (onlyMine) list = list.filter((it) => ownerIds.has(it.id));
+    if (onlyMine) list = list.filter((it) => !!getOwnerTokenFor(it.id));
     list = list
       .slice()
       .sort((a, b) =>
@@ -172,7 +193,7 @@ export default function GalleryClient() {
           : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
       );
     return list;
-  }, [items, query, onlyMine, sort, ownerIds]);
+  }, [items, query, onlyMine, sort]);
 
   // --- Lightbox helpers
   function openAt(i: number) {
@@ -265,17 +286,17 @@ export default function GalleryClient() {
             const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
             const openPost =
               it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl) ? it.postUrl : "";
-            const isOwner = ownerIds.has(it.id);
+            const isOwner = !!getOwnerTokenFor(it.id);
 
             return (
               <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
-                {/* Wrapper seragam tinggi, gambar asli (contain) */}
-                <div className="relative cursor-pointer bg-black flex items-center justify-center" onClick={() => openAt(idx)} style={{ height: 240 }}>
+                <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
                   <img
                     src={it.url}
                     alt={it.title}
-                    className="max-h-full max-w-full object-contain transition-transform duration-300 hover:scale-[1.02]"
+                    className="w-full aspect-[4/3] object-contain bg-black/20"  // tampilkan full (tanpa crop)
                   />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleLike(it); }}
                     aria-pressed={like.liked}
@@ -330,8 +351,7 @@ export default function GalleryClient() {
                       <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
                       <button
                         onClick={async () => {
-                          const map = readTokenMap();
-                          const token = map[it.id];
+                          const token = getOwnerTokenFor(it.id);
                           if (!token) return alert("Delete token not found. Use the same browser you used to submit.");
                           if (!confirm("Delete this artwork?")) return;
 
@@ -367,7 +387,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* === Lightbox (tetap) */}
+      {/* === Lightbox === */}
       {selectedIndex !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
