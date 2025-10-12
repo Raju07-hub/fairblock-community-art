@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { getOwnerToken } from "@/lib/storage"; // ⬅️ pakai token global yang benar
+import { getOwnerToken } from "@/lib/storage"; // token global fbc_owner_token
 
 type Artwork = {
   id: string;
@@ -14,6 +14,18 @@ type Artwork = {
   metaUrl: string;
   postUrl?: string;
 };
+
+// --- LEGACY: baca token per-item dari localStorage "fairblock:tokens"
+function getLegacyTokenFor(id: string): string | null {
+  try {
+    const raw = localStorage.getItem("fairblock:tokens");
+    if (!raw) return null;
+    const map = JSON.parse(raw || "{}");
+    return map?.[id] || null;
+  } catch {
+    return null;
+  }
+}
 
 function at(x?: string) {
   if (!x) return "";
@@ -33,12 +45,13 @@ export default function EditArtworkPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Load artwork by id
   useEffect(() => {
     if (!id) return;
     (async () => {
       setLoading(true);
       try {
-        const j = await fetch("/api/gallery", { cache: "no-store" }).then(r => r.json());
+        const j = await fetch("/api/gallery", { cache: "no-store" }).then((r) => r.json());
         const list: Artwork[] = j?.items || [];
         const found = list.find((a) => a.id === id) || null;
         if (!found) {
@@ -60,8 +73,11 @@ export default function EditArtworkPage() {
   async function onSave() {
     if (!item) return;
 
-    // ⬇⬇ gunakan token global yg sama dengan yg disimpan saat submit (meta.ownerToken)
-    const token = getOwnerToken();
+    // 1) Coba token global (fbc_owner_token), 2) fallback ke token legacy per-item
+    const tokenGlobal = getOwnerToken();
+    const tokenLegacy = getLegacyTokenFor(item.id);
+    const token = tokenGlobal || tokenLegacy;
+
     if (!token) {
       alert("Owner token not found in this browser. Gunakan browser yang sama saat submit.");
       return;
@@ -80,7 +96,6 @@ export default function EditArtworkPage() {
         postUrl: postUrl.trim(),
       };
 
-      // coba PATCH → (server kita juga support PUT/override, tapi PATCH cukup)
       const resp = await fetch(`/api/art/${item.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -117,7 +132,6 @@ export default function EditArtworkPage() {
       </div>
     );
   }
-
   if (!item) return null;
 
   return (
