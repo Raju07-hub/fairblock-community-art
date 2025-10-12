@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Heart, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Heart, X, ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
 
+/* ---------------- Types ---------------- */
 type GalleryItem = {
   id: string;
   title: string;
@@ -13,11 +14,12 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
-  ownerTokenHash?: string;
+  ownerTokenHash?: string; // <-- penting untuk karya baru/hasil klaim
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
 
+/* ---------------- Utils ---------------- */
 function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
@@ -86,6 +88,7 @@ async function copyTextForce(text: string) {
   }
 }
 
+/* ---------------- Component ---------------- */
 export default function GalleryClient() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [likes, setLikes] = useState<LikeMap>({});
@@ -94,6 +97,7 @@ export default function GalleryClient() {
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
+  // token hashes (buat cocokkan ownerTokenHash dari server)
   const [localTokenHashes, setLocalTokenHashes] = useState<Set<string>>(new Set());
 
   // lightbox
@@ -101,6 +105,7 @@ export default function GalleryClient() {
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
 
+  // siapkan hash dari semua token lokal (global + legacy)
   useEffect(() => {
     (async () => {
       const tokens = getAllLocalTokens();
@@ -117,24 +122,6 @@ export default function GalleryClient() {
       const list: GalleryItem[] = j?.items || [];
       setItems(list);
 
-      // MIGRASI: tambahkan ownerTokenHash utk karya lama yg punya legacy token
-      (async () => {
-        for (const it of list) {
-          if (!it.ownerTokenHash) {
-            const legacy = getLegacyTokenFor(it.id);
-            if (legacy) {
-              try {
-                await fetch(`/api/art/${it.id}`, {
-                  method: "PATCH",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ token: legacy, metaUrl: it.metaUrl, patch: {} }),
-                });
-              } catch {}
-            }
-          }
-        }
-      })();
-
       if (list.length) {
         const ids = list.map((i) => i.id).join(",");
         const liked = await fetch(`/api/likes?ids=${ids}&ts=${ts}`, { cache: "no-store" }).then((r) =>
@@ -150,6 +137,7 @@ export default function GalleryClient() {
     load();
   }, []);
 
+  // like
   async function toggleLike(it: GalleryItem) {
     const author = at(it.x) || at(it.discord);
     const j = await fetch("/api/like", {
@@ -162,9 +150,51 @@ export default function GalleryClient() {
     }
   }
 
+  // owner check:
+  // - prioritas ownerTokenHash vs hash token lokal
+  // - fallback legacy token per-ID
   function isOwner(it: GalleryItem): boolean {
     if (it.ownerTokenHash) return localTokenHashes.has(it.ownerTokenHash);
-    return !!getLegacyTokenFor(it.id); // fallback karya lama
+    return !!getLegacyTokenFor(it.id);
+  }
+
+  // tombol "Claim" tampil bila:
+  // - belum owner
+  // - meta belum punya ownerTokenHash
+  // - browser punya minimal satu token (global atau legacy per id)
+  function canClaim(it: GalleryItem): boolean {
+    if (isOwner(it)) return false;
+    if (it.ownerTokenHash) return false;
+    const hasLegacy = !!getLegacyTokenFor(it.id);
+    const hasGlobal = !!getGlobalOwnerToken();
+    return hasLegacy || hasGlobal;
+  }
+
+  async function claimOwnership(it: GalleryItem) {
+    const legacy = getLegacyTokenFor(it.id);
+    const all = getAllLocalTokens();
+    const token = legacy || all[0];
+    if (!token) return alert("Token lokal tidak ditemukan di browser ini.");
+
+    try {
+      const res = await fetch(`/api/art/${it.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, metaUrl: it.metaUrl, patch: {} }), // patch kosong -> hanya isi ownerTokenHash
+      });
+      const j = await res.json();
+      if (!res.ok || j?.success === false) throw new Error(j?.error || "Claim failed");
+
+      // update state: set ownerTokenHash agar tombol Edit/Delete muncul
+      const newHash = await sha256Hex(token);
+      setItems((prev) =>
+        prev.map((g) => (g.id === it.id ? { ...g, ownerTokenHash: newHash } : g))
+      );
+      setLocalTokenHashes((s) => new Set(s).add(newHash));
+      alert("Ownership claimed ✔");
+    } catch (e: any) {
+      alert(e?.message || "Claim error");
+    }
   }
 
   const filtered = useMemo(() => {
@@ -184,20 +214,11 @@ export default function GalleryClient() {
     return list;
   }, [items, query, onlyMine, sort, localTokenHashes]);
 
+  // lightbox helpers
   function openAt(i: number) { setAnimDir(null); setSelectedIndex(i); }
   function closeLightbox() { setSelectedIndex(null); }
   function prevImage() { if (selectedIndex === null) return; setAnimDir("left"); setSelectedIndex((i) => (i! > 0 ? i! - 1 : filtered.length - 1)); }
   function nextImage() { if (selectedIndex === null) return; setAnimDir("right"); setSelectedIndex((i) => (i! < filtered.length - 1 ? i! + 1 : 0)); }
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") closeLightbox();
-      if (e.key === "ArrowLeft") prevImage();
-      if (e.key === "ArrowRight") nextImage();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
 
   useEffect(() => {
     if (selectedIndex === null) return;
@@ -258,10 +279,12 @@ export default function GalleryClient() {
             const openPost =
               it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl) ? it.postUrl : "";
             const owner = isOwner(it);
+            const claimable = canClaim(it);
 
             return (
               <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
                 <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
+                  {/* Gambar ori, tidak crop */}
                   <div className="w-full aspect-[4/3] bg-black/10 flex items-center justify-center overflow-hidden">
                     <img
                       src={it.url}
@@ -269,6 +292,7 @@ export default function GalleryClient() {
                       className="max-w-full max-h-full w-auto h-auto object-contain"
                     />
                   </div>
+
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleLike(it); }}
@@ -319,36 +343,50 @@ export default function GalleryClient() {
                     </button>
                   </div>
 
-                  {owner && (
-                    <div className="mt-3 flex gap-2">
-                      <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
-                      <button
-                        onClick={async () => {
-                          const legacy = getLegacyTokenFor(it.id);
-                          const all = getAllLocalTokens();
-                          const token = legacy || all[0];
-                          if (!token) return alert("Owner token not found in this browser.");
-                          if (!confirm("Delete this artwork?")) return;
+                  {/* Owner controls */}
+                  <div className="mt-3 flex gap-2 flex-wrap">
+                    {owner && (
+                      <>
+                        <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
+                        <button
+                          onClick={async () => {
+                            const legacy = getLegacyTokenFor(it.id);
+                            const all = getAllLocalTokens();
+                            const token = legacy || all[0];
+                            if (!token) return alert("Delete token not found in this browser.");
+                            if (!confirm("Delete this artwork?")) return;
 
-                          try {
-                            const res = await fetch(`/api/art/${it.id}`, {
-                              method: "DELETE",
-                              headers: { "content-type": "application/json", "x-owner-token": token },
-                              body: JSON.stringify({ metaUrl: it.metaUrl }),
-                            });
-                            const j = await res.json();
-                            if (j?.success) setItems((prev) => prev.filter((x) => x.id !== it.id));
-                            else alert(j?.error || "Delete failed");
-                          } catch (e: any) {
-                            alert(e?.message || "Delete error");
-                          }
-                        }}
-                        className="btn px-3 py-1 text-xs bg-red-500/30"
+                            try {
+                              const res = await fetch(`/api/art/${it.id}`, {
+                                method: "DELETE",
+                                headers: { "content-type": "application/json", "x-owner-token": token },
+                                body: JSON.stringify({ metaUrl: it.metaUrl }),
+                              });
+                              const j = await res.json();
+                              if (j?.success) setItems((prev) => prev.filter((x) => x.id !== it.id));
+                              else alert(j?.error || "Delete failed");
+                            } catch (e: any) {
+                              alert(e?.message || "Delete error");
+                            }
+                          }}
+                          className="btn px-3 py-1 text-xs bg-red-500/30"
+                        >
+                          🗑 Delete
+                        </button>
+                      </>
+                    )}
+
+                    {!owner && claimable && (
+                      <button
+                        onClick={() => claimOwnership(it)}
+                        className="btn px-3 py-1 text-xs bg-emerald-500/30 inline-flex items-center gap-1"
+                        title="Claim ownership with your local token"
                       >
-                        🗑 Delete
+                        <ShieldCheck className="w-4 h-4" />
+                        Claim
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             );
