@@ -13,7 +13,7 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
-  ownerTokenHash?: string; // NEW
+  ownerTokenHash?: string; // NEW (mungkin kosong utk karya lama)
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
@@ -23,31 +23,47 @@ function at(x?: string) {
   return x.startsWith("@") ? x : `@${x}`;
 }
 
-// --- utils
+/** legacy: token per-ID yang disimpan saat submit versi lama */
+function getLegacyTokenFor(id: string): string | null {
+  try {
+    const raw = localStorage.getItem("fairblock:tokens");
+    if (!raw) return null;
+    const map = JSON.parse(raw || "{}");
+    return map?.[id] || null;
+  } catch {
+    return null;
+  }
+}
+
+/** global owner token (versi baru) */
+function getGlobalOwnerToken(): string | null {
+  try {
+    return localStorage.getItem("fairblock:owner-token");
+  } catch {
+    return null;
+  }
+}
+
+/** list semua token yang ada di browser (global + semua legacy) */
+function getAllLocalTokens(): string[] {
+  const out: string[] = [];
+  const g = getGlobalOwnerToken();
+  if (g) out.push(g);
+  try {
+    const raw = localStorage.getItem("fairblock:tokens");
+    if (raw) {
+      const map = JSON.parse(raw || "{}");
+      for (const k of Object.keys(map)) if (map[k]) out.push(String(map[k]));
+    }
+  } catch {}
+  return Array.from(new Set(out));
+}
+
 async function sha256Hex(s: string) {
   const enc = new TextEncoder().encode(s);
   const buf = await crypto.subtle.digest("SHA-256", enc);
   const bytes = Array.from(new Uint8Array(buf));
   return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Ambil semua token yang pernah tersimpan (legacy map + global) */
-function getAllLocalTokens(): string[] {
-  const out: string[] = [];
-  try {
-    const rawMap = localStorage.getItem("fairblock:tokens");
-    if (rawMap) {
-      const map = JSON.parse(rawMap || "{}");
-      for (const k of Object.keys(map)) {
-        if (map[k]) out.push(String(map[k]));
-      }
-    }
-  } catch {}
-  try {
-    const global = localStorage.getItem("fairblock:owner-token");
-    if (global) out.push(global);
-  } catch {}
-  return Array.from(new Set(out));
 }
 
 async function copyTextForce(text: string) {
@@ -81,7 +97,7 @@ export default function GalleryClient() {
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
-  // simpan hash semua token lokal sekali saja
+  // simpan hash semua token lokal (utk cocokkan dgn ownerTokenHash jika ada)
   const [localTokenHashes, setLocalTokenHashes] = useState<Set<string>>(new Set());
 
   // lightbox
@@ -89,7 +105,6 @@ export default function GalleryClient() {
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
 
-  // hitung hash token lokal
   useEffect(() => {
     (async () => {
       const tokens = getAllLocalTokens();
@@ -98,7 +113,6 @@ export default function GalleryClient() {
     })();
   }, []);
 
-  // load gallery
   async function load() {
     setLoading(true);
     try {
@@ -134,10 +148,16 @@ export default function GalleryClient() {
     }
   }
 
-  /** Apakah item ini milik user berdasar kecocokan hash token lokal */
+  /** Apakah item ini milik user?
+   *  - Jika meta punya ownerTokenHash: cocokkan dgn hash token lokal
+   *  - Jika TIDAK ada ownerTokenHash (karya lama): cek token legacy per-ID
+   */
   function isOwner(it: GalleryItem): boolean {
-    if (!it.ownerTokenHash) return false;
-    return localTokenHashes.has(it.ownerTokenHash);
+    if (it.ownerTokenHash) {
+      return localTokenHashes.has(it.ownerTokenHash);
+    }
+    // fallback legacy
+    return !!getLegacyTokenFor(it.id);
   }
 
   const filtered = useMemo(() => {
@@ -253,7 +273,7 @@ export default function GalleryClient() {
             return (
               <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
                 <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
-                  {/* TAMPILKAN UTUH (tidak terpotong) */}
+                  {/* tampilkan utuh tanpa cropping */}
                   <div className="w-full aspect-[4/3] bg-black/10 flex items-center justify-center overflow-hidden">
                     <img
                       src={it.url}
@@ -316,15 +336,21 @@ export default function GalleryClient() {
                       <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
                       <button
                         onClick={async () => {
-                          const candidateTokens = getAllLocalTokens();
-                          if (candidateTokens.length === 0) return alert("Owner token not found in this browser.");
+                          // pilih token terbaik utk delete:
+                          // 1) token legacy per-ID (jika ada)
+                          // 2) selain itu ambil global/pertama yang tersedia
+                          const legacy = getLegacyTokenFor(it.id);
+                          const all = getAllLocalTokens();
+                          const token = legacy || all[0];
+                          if (!token) return alert("Owner token not found in this browser.");
                           if (!confirm("Delete this artwork?")) return;
+
                           try {
                             const res = await fetch(`/api/art/${it.id}`, {
                               method: "DELETE",
                               headers: {
                                 "content-type": "application/json",
-                                "x-owner-token": candidateTokens[0],
+                                "x-owner-token": token,
                               },
                               body: JSON.stringify({ metaUrl: it.metaUrl }),
                             });
