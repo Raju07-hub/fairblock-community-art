@@ -22,12 +22,12 @@ export async function OPTIONS() {
   });
 }
 
-/* ---------- DELETE: hapus image + meta ---------- */
+/* ---------- DELETE ---------- */
 export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> }) {
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    if (!process.env.BLOB_READ_WRITE_TOKEN)
       return NextResponse.json({ success: false, error: "Missing BLOB_READ_WRITE_TOKEN" }, { status: 500 });
-    }
+
     const { id } = await ctx.params;
     const body = await req.json().catch(() => ({} as any));
     const metaUrl: string = body?.metaUrl || "";
@@ -37,15 +37,17 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> })
       body?.token ||
       "";
 
-    if (!id) return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
-    if (!metaUrl) return NextResponse.json({ success: false, error: "Missing metaUrl" }, { status: 400 });
+    if (!id || !metaUrl)
+      return NextResponse.json({ success: false, error: "Missing id or metaUrl" }, { status: 400 });
 
     const metaRes = await fetch(metaUrl, { cache: "no-store" });
-    if (!metaRes.ok) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
+    if (!metaRes.ok)
+      return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     const meta = await metaRes.json();
 
     const ok = !!provided && (provided === meta.ownerTokenHash || sha256(provided) === meta.ownerTokenHash);
-    if (!ok) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    if (!ok)
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
     const files = [metaUrl];
     if (meta?.imageUrl) files.push(meta.imageUrl);
@@ -57,44 +59,35 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> })
   }
 }
 
-/* ---------- EDIT handler (dipakai PUT/POST/PATCH) ---------- */
+/* ---------- EDIT (PUT/PATCH/POST) ---------- */
 async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    if (!process.env.BLOB_READ_WRITE_TOKEN)
       return NextResponse.json({ success: false, error: "Missing BLOB_READ_WRITE_TOKEN" }, { status: 500 });
-    }
+
     const { id } = await ctx.params;
-    if (!id) return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
-
     const raw = await req.json().catch(() => ({} as any));
-    // dukung 2 bentuk payload: flat & nested { patch: {...} }
     const metaUrl: string = raw?.metaUrl || raw?.patch?.metaUrl || "";
-    const provided =
-      req.headers.get("x-owner-token") ||
-      raw?.token ||
-      raw?.patch?.token ||
-      "";
-
+    const provided = req.headers.get("x-owner-token") || raw?.token || raw?.patch?.token || "";
     const patch = raw?.patch || raw || {};
-    const title = patch?.title;
-    const x = patch?.x;
-    const discord = patch?.discord;
-    const postUrl = patch?.postUrl;
+    const { title, x, discord, postUrl } = patch;
 
-    if (!metaUrl) return NextResponse.json({ success: false, error: "Missing metaUrl" }, { status: 400 });
+    if (!id || !metaUrl)
+      return NextResponse.json({ success: false, error: "Missing id or metaUrl" }, { status: 400 });
 
-    // baca meta lama
     const metaRes = await fetch(metaUrl, { cache: "no-store" });
-    if (!metaRes.ok) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
+    if (!metaRes.ok)
+      return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     const old = await metaRes.json();
 
-    // auth
     const ok =
       !!provided &&
       (provided === old.ownerTokenHash || sha256(provided) === old.ownerTokenHash);
-    if (!ok) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    if (!ok)
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
-    // meta baru
+    const now = new Date().toISOString();
+
     const nextMeta = {
       id: old.id,
       title: String(title ?? old.title).trim(),
@@ -103,20 +96,16 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
       postUrl: normPostUrl(postUrl ?? old.postUrl),
       imageUrl: old.imageUrl,
       createdAt: old.createdAt,
+      updatedAt: now, // ⬅️ penting untuk cache busting
       ownerTokenHash: old.ownerTokenHash,
     };
 
-    // overwrite meta JSON di key deterministik
-    await blobPut(
-  `fairblock/meta/${id}.json`,
-  Buffer.from(JSON.stringify(nextMeta)),
-  {
-    access: "public",
-    contentType: "application/json",
-    token: process.env.BLOB_READ_WRITE_TOKEN!,
-    allowOverwrite: true,        // ← WAJIB untuk overwrite file yang sama
-  }
-);
+    await blobPut(`fairblock/meta/${id}.json`, Buffer.from(JSON.stringify(nextMeta)), {
+      access: "public",
+      contentType: "application/json",
+      token: process.env.BLOB_READ_WRITE_TOKEN!,
+      allowOverwrite: true, // ⬅️ fix overwrite error
+    });
 
     return NextResponse.json({ success: true, meta: nextMeta });
   } catch (e: any) {
@@ -125,5 +114,5 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
 }
 
 export const PUT = editHandler;
-export const POST = editHandler;
 export const PATCH = editHandler;
+export const POST = editHandler;

@@ -16,19 +16,8 @@ function normHandle(v?: string) {
 
 export async function GET() {
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json(
-        { success: true, items: [], nextCursor: null, count: 0 },
-        {
-          headers: {
-            "cache-control": "no-store, no-cache, must-revalidate",
-            pragma: "no-cache",
-            "surrogate-control": "no-store",
-            "x-accel-expires": "0",
-          },
-        }
-      );
-    }
+    if (!process.env.BLOB_READ_WRITE_TOKEN)
+      return NextResponse.json({ success: true, items: [] });
 
     const { list } = (await import("@vercel/blob")) as { list: ListFn };
     const { blobs } = await list({
@@ -37,17 +26,14 @@ export async function GET() {
       limit: 100,
     });
 
-    // 1 timestamp untuk bust cache semua fetch meta di request ini
-    const bust = Date.now();
+    const bust = Date.now(); // ⬅️ untuk cache bust
 
     const items = await Promise.all(
       blobs.map(async (b) => {
         try {
-          // ⛔️ cache: no-store + query buster
           const res = await fetch(`${b.url}?v=${bust}`, { cache: "no-store" });
           if (!res.ok) return null;
           const meta = await res.json();
-
           const imageUrl: string | undefined = meta.imageUrl || meta.url;
           if (!meta?.id || !meta?.title || !imageUrl) return null;
 
@@ -57,8 +43,9 @@ export async function GET() {
             x: normHandle(meta.x),
             discord: normHandle(meta.discord),
             postUrl: meta.postUrl ? String(meta.postUrl) : "",
-            url: imageUrl,
+            url: imageUrl + `?v=${meta.updatedAt || bust}`, // cache-bust image
             createdAt: String(meta.createdAt || ""),
+            updatedAt: String(meta.updatedAt || ""),
             metaUrl: b.url,
           };
         } catch {
@@ -68,13 +55,11 @@ export async function GET() {
     );
 
     const filtered = (items.filter(Boolean) as any[]).sort(
-      (a, b) =>
-        (new Date(b.createdAt).getTime() || 0) -
-        (new Date(a.createdAt).getTime() || 0)
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
     return NextResponse.json(
-      { success: true, items: filtered, nextCursor: null, count: filtered.length },
+      { success: true, items: filtered, count: filtered.length },
       {
         headers: {
           "cache-control": "no-store, no-cache, must-revalidate",
@@ -85,17 +70,6 @@ export async function GET() {
       }
     );
   } catch (e: any) {
-    return NextResponse.json(
-      { success: false, error: e?.message || "Failed to fetch gallery" },
-      {
-        status: 500,
-        headers: {
-          "cache-control": "no-store",
-          pragma: "no-cache",
-          "surrogate-control": "no-store",
-          "x-accel-expires": "0",
-        },
-      }
-    );
+    return NextResponse.json({ success: false, error: e?.message || "Failed to fetch gallery" }, { status: 500 });
   }
 }
