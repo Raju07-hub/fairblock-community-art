@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -7,43 +6,18 @@ type TopItem = {
   id: string;
   likes?: number;
   title?: string;
-  owner?: string;   // X handle (e.g. "@name")
-  discord?: string; // NEW: discord handle (e.g. "@user#1234" → we store normalized "@user")
-  postUrl?: string; // NEW: X/Twitter post link
-  url?: string;     // optional preview
+  owner?: string;
+  discord?: string;
+  postUrl?: string;
+  url?: string;
 };
-type Creator = { user: string; uploads: number };
-type Scope = "daily" | "weekly" | "alltime";
 
-const MS = 1000, DAY = 86400000, WEEK = DAY * 7;
-
-function nextDailyResetUTC(now = new Date()): Date {
-  const targetMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0);
-  return new Date(targetMs);
-}
-function nextWeeklyResetUTC_Saturday(now = new Date()): Date {
-  const todayMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0);
-  const day = new Date(todayMidnight).getUTCDay();
-  let daysAhead = (6 - day + 7) % 7;
-  let target = new Date(todayMidnight + daysAhead * DAY);
-  if (now.getTime() >= target.getTime()) target = new Date(target.getTime() + WEEK);
-  return target;
-}
-function formatDuration(ms: number): string {
-  if (ms < 0) ms = 0;
-  const s = Math.floor(ms / MS) % 60;
-  const m = Math.floor(ms / (60 * MS)) % 60;
-  const h = Math.floor(ms / (3600 * MS));
-  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-  return `${pad(h)}:${pad(m)}:${pad(s)}`;
-}
+type Scope = "weekly" | "monthly"; // <— hanya ini
 
 export default function LeaderboardPage() {
-  const [scope, setScope] = useState<Scope>("daily");
+  const [scope, setScope] = useState<Scope>("weekly");
   const [loading, setLoading] = useState(true);
   const [topArts, setTopArts] = useState<TopItem[]>([]);
-  const [topCreators, setTopCreators] = useState<Creator[]>([]);
-  const [countdown, setCountdown] = useState("--:--:--");
 
   const pill = (active: boolean) =>
     `btn px-4 py-1 rounded-full text-sm ${active ? "bg-[#3aaefc]/30" : "bg-white/10"}`;
@@ -54,42 +28,18 @@ export default function LeaderboardPage() {
   async function load() {
     setLoading(true);
     try {
-      // /api/leaderboard/:scope harus mengembalikan: { top_art: TopItem[], top_creators: Creator[] }
-      const r = await fetch(`/api/leaderboard/${scope}`, { cache: "no-store" });
+      const r = await fetch(`/api/leaderboard?range=${scope}`, { cache: "no-store" });
       const j = await r.json();
-      setTopArts(j?.top_art || []);
-      setTopCreators(j?.top_creators || []);
+      setTopArts(j?.topArts || j?.top_art || []);
     } finally {
       setLoading(false);
     }
   }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope]);
 
-  useEffect(() => { load(); }, [scope]);
-
-  useEffect(() => {
-    function tick() {
-      const now = new Date();
-      const target = scope === "weekly" ? nextWeeklyResetUTC_Saturday(now) : nextDailyResetUTC(now);
-      setCountdown(formatDuration(target.getTime() - now.getTime()));
-    }
-    if (scope !== "alltime") {
-      tick();
-      const id = setInterval(tick, 1000);
-      return () => clearInterval(id);
-    } else {
-      setCountdown("--:--:--");
-    }
-  }, [scope]);
-
-  const resetLabel =
-    scope === "weekly"
-      ? "Weekly reset: every Saturday at 07:00 UTC+7"
-      : scope === "daily"
-      ? "Daily reset: every day at 07:00 UTC+7"
-      : "All-Time";
-
-  const headerTitle =
-    scope === "alltime" ? "🏆 Top Art (All Time)" : `🏆 Top Art (${scope.toUpperCase()})`;
+  const resetLabel = scope === "weekly"
+    ? "Weekly reset: setiap Senin 07:00 UTC+7"
+    : "Monthly reset: setiap tanggal 1 pukul 07:00 UTC+7";
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10">
@@ -100,15 +50,11 @@ export default function LeaderboardPage() {
           <Link href="/submit" className="btn">＋ Submit</Link>
           <Link href="/history" className="btn">🗂 History</Link>
         </div>
-        <div className="flex flex-col sm:flex-row items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs opacity-70">{resetLabel}</span>
-          {scope !== "alltime" && (
-            <span className="text-sm font-semibold text-[#3aaefc]">Resets in {countdown}</span>
-          )}
           <div className="flex gap-2">
-            <button className={pill(scope === "daily")} onClick={() => setScope("daily")}>Daily</button>
             <button className={pill(scope === "weekly")} onClick={() => setScope("weekly")}>Weekly</button>
-            <button className={pill(scope === "alltime")} onClick={() => setScope("alltime")}>All Time</button>
+            <button className={pill(scope === "monthly")} onClick={() => setScope("monthly")}>Monthly</button>
           </div>
           <button onClick={load} className={btn} disabled={loading}>↻ {loading ? "Refreshing…" : "Refresh"}</button>
         </div>
@@ -117,97 +63,43 @@ export default function LeaderboardPage() {
       {loading ? (
         <p className="opacity-70">Loading…</p>
       ) : (
-        <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.3fr)_minmax(0,1fr)] gap-6">
-          {/* Top Art */}
-          <section>
-            <h2 className={heading}>{headerTitle}</h2>
-            <div className="space-y-3">
-              {topArts.slice(0, 10).map((t, idx) => {
-                const title = t.title ?? "Untitled";
-                const xHandle = t.owner || "";     // from API
-                const discord = t.discord || "";   // from API
-                const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
-                const xProfile = xHandle ? `https://x.com/${xHandle.replace(/^@/,"")}` : "";
-
-                return (
-                  <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
-                    <div className="flex items-center gap-4 min-w-0">
-                      <span className="w-7 text-center opacity-70">{idx + 1}.</span>
-                      {t.url && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={t.url}
-                          alt={title}
-                          className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl object-cover bg-white/10 shrink-0 shadow-md"
-                          loading="lazy"
-                          decoding="async"
-                        />
-                      )}
-                      <div className="min-w-0">
-                        <div className="font-medium truncate text-base">{title}</div>
-
-                        <div className="mt-1 text-sm opacity-80 space-x-2">
-                          {xHandle && (
-                            <a className="underline hover:opacity-90" href={xProfile} target="_blank" rel="noopener noreferrer">
-                              {xHandle}
-                            </a>
-                          )}
-                          {discord && (
-                            <span className="opacity-70">· {discord}</span>
-                          )}
-                        </div>
-
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
-                          {t.postUrl && (
-                            <a href={t.postUrl} target="_blank" rel="noreferrer" className={btn}>Open Art Post</a>
-                          )}
-                          {xHandle && (
-                            <a href={xProfile} target="_blank" rel="noreferrer" className={btn}>Open X Profile</a>
-                          )}
-                        </div>
+        <section>
+          <h2 className={heading}>🏆 Top Art ({scope.toUpperCase()})</h2>
+          <div className="space-y-3">
+            {topArts.slice(0, 10).map((t, idx) => {
+              const title = t.title ?? "Untitled";
+              const xHandle = t.owner || "";
+              const discord = t.discord || "";
+              const seeOnGallery = `/gallery?select=${encodeURIComponent(t.id)}`;
+              const xProfile = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
+              return (
+                <div key={t.id} className="flex items-center justify-between bg-white/5 rounded-xl p-5 md:p-6">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <span className="w-7 text-center opacity-70">{idx + 1}.</span>
+                    {t.url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.url} alt={title} className="w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-2xl object-cover bg-white/10 shrink-0 shadow-md" loading="lazy" decoding="async" />
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-medium truncate text-base">{title}</div>
+                      <div className="mt-1 text-sm opacity-80 space-x-2">
+                        {xHandle && <a className="underline hover:opacity-90" href={xProfile} target="_blank" rel="noopener noreferrer">{xHandle}</a>}
+                        {discord && <span className="opacity-70">· {discord}</span>}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Link href={seeOnGallery} className={btn}>See on Gallery</Link>
+                        {t.postUrl && <a href={t.postUrl} target="_blank" rel="noreferrer" className={btn}>Open Art Post</a>}
+                        {xHandle && <a href={xProfile} target="_blank" rel="noreferrer" className={btn}>Open X Profile</a>}
                       </div>
                     </div>
-                    <span className={badge}>{t.likes ?? 0}</span>
                   </div>
-                );
-              })}
-            </div>
-          </section>
-
-          {/* Top Creators */}
-          <section>
-            <h2 className={heading}>🧬 Top Creators (Top 10)</h2>
-            <div className="space-y-3">
-              {topCreators
-                .slice(0, 10)
-                .sort((a, b) => b.uploads - a.uploads)
-                .map((c, idx) => {
-                  const handle = c.user?.startsWith("@") ? c.user : `@${c.user}`;
-                  const galleryLink = `/gallery?q=${encodeURIComponent(handle)}`;
-                  const xUrl = `https://x.com/${handle.replace(/^@/, "")}`;
-                  return (
-                    <div key={handle} className="flex items-center justify-between bg-white/5 rounded-xl p-2.5">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="w-6 text-center opacity-70 text-sm">{idx + 1}.</span>
-                        <div className="min-w-0">
-                          <div className="font-medium truncate text-[15px]">{handle}</div>
-                          <div className="text-xs opacity-60">Uploads: {c.uploads}</div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Link href={galleryLink} className="btn px-3 py-1 rounded-full text-xs">Search on Gallery</Link>
-                            <a href={xUrl} target="_blank" rel="noreferrer" className="btn px-3 py-1 rounded-full text-xs">Open X Profile</a>
-                          </div>
-                        </div>
-                      </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold text-white bg-gradient-to-r from-[#3aaefc] to-[#4af2ff]">
-                        {c.uploads}
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
-          </section>
-        </div>
+                  <span className={badge}>{t.likes ?? 0}</span>
+                </div>
+              );
+            })}
+            {!topArts?.length && <div className="opacity-70">Belum ada data untuk periode ini.</div>}
+          </div>
+        </section>
       )}
     </div>
   );

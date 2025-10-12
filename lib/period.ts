@@ -37,3 +37,28 @@ export function prevIsoWeek(w: string) {
   const num = Math.max(1, Number(wstr) - 1);
   return `${y}-W${pad(num)}`;
 }
+
+// --- tambahkan di bawah export function prevIsoWeek(...)
+export function ym() {
+  const n = nowLocal();
+  const y = n.getUTCFullYear();
+  const m = (n.getUTCMonth() + 1).toString().padStart(2, "0");
+  return `${y}-${m}`;            // contoh: 2025-10
+}
+
+export function prevYm(s?: string) {
+  // optional util: mundur 1 bulan dari "YYYY-MM" (atau dari nowLocal() kalau undefined)
+  let y: number, m: number;
+  if (s) {
+    const [yy, mm] = s.split("-").map(Number);
+    y = yy; m = mm - 1;
+  } else {
+    const n = nowLocal();
+    y = n.getUTCFullYear(); m = n.getUTCMonth();
+  }
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  const yy = d.getUTCFullYear();
+  const mm = (d.getUTCMonth() + 1).toString().padStart(2, "0");
+  return `${yy}-${mm}`;
+}
+

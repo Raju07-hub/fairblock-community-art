@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
-import { ymd, isoWeek } from "@/lib/period";
+import { isoWeek, ym } from "@/lib/period";
 
 function toPairs(a: any[]) {
   const out: { id: string; score: number }[] = [];
@@ -14,12 +14,20 @@ function toPairs(a: any[]) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const range = (searchParams.get("range") || "daily").toLowerCase();
+    const range = (searchParams.get("range") || "weekly").toLowerCase(); // weekly | monthly
 
-    const day = ymd();
-    const week = isoWeek();
+    let key: string;
+    if (range === "weekly") {
+      key = `lb:art:weekly:${isoWeek()}`;
+    } else if (range === "monthly") {
+      key = `lb:art:monthly:${ym()}`;
+    } else {
+      return NextResponse.json(
+        { success: false, error: "range must be 'weekly' or 'monthly'" },
+        { status: 400 }
+      );
+    }
 
-    const key = range === "weekly" ? `lb:art:weekly:${week}` : `lb:art:daily:${day}`;
     const arr = await (kv as any).zrevrange(key, 0, 99, { withscores: true });
     const topArts = toPairs(arr);
 

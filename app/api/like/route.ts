@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import kv from "@/lib/kv";
 import { getUserIdFromCookies, ensureUserIdCookie } from "@/lib/user-id";
+import { ym } from "@/lib/period"; // NEW: pakai helper bulanan
 
 /** === Period helpers (UTC) === */
 function pad(n: number) { return n < 10 ? `0${n}` : `${n}`; }
@@ -18,17 +19,24 @@ function isoWeek(d = new Date()) {
   return `${date.getUTCFullYear()}-W${pad(week)}`;
 }
 
+// Counters & user flags
 const cKey = (id: string) => `likes:count:${id}`;
 const uKey = (uid: string, id: string) => `likes:user:${uid}:${id}`;
+
+// Last-like period trackers (untuk rollback unlike)
 const lastDailyKey = (uid: string, id: string) => `likes:lastDaily:${uid}:${id}`;
 const lastWeeklyKey = (uid: string, id: string) => `likes:lastWeekly:${uid}:${id}`;
+const lastMonthlyKey = (uid: string, id: string) => `likes:lastMonthly:${uid}:${id}`; // NEW
 
-function lbKeys(day: string, week: string) {
+// Leaderboard keys
+function lbKeys(day: string, week: string, month: string) {
   return {
-    artDaily:     `lb:art:daily:${day}`,
-    artWeekly:    `lb:art:weekly:${week}`,
-    creatorDaily: `lb:creator:daily:${day}`,
-    creatorWeekly:`lb:creator:weekly:${week}`,
+    artDaily:      `lb:art:daily:${day}`,
+    artWeekly:     `lb:art:weekly:${week}`,
+    artMonthly:    `lb:art:monthly:${month}`,      // NEW
+    creatorDaily:  `lb:creator:daily:${day}`,
+    creatorWeekly: `lb:creator:weekly:${week}`,
+    creatorMonthly:`lb:creator:monthly:${month}`,  // NEW
   };
 }
 
@@ -48,60 +56,71 @@ export async function POST(req: NextRequest) {
 
   const day = ymd();
   const week = isoWeek();
-  const keys = lbKeys(day, week);
+  const month = ym(); // NEW
+  const keys = lbKeys(day, week, month);
 
   let liked: boolean;
   let count: number;
 
   if (alreadyLiked) {
-    // UNLIKE — rollback to period when the like happened
+    // === UNLIKE — rollback ke periode saat like terjadi ===
     const curCount = (await kv.get<number | null>(cKey(id))) ?? 0;
     count = curCount > 0 ? await kv.decr(cKey(id)) : 0;
     await kv.decr(userFlagKey);
     liked = false;
 
-    const lastDay = (await kv.get<string | null>(lastDailyKey(uid!, id))) || day;
-    const lastWeek = (await kv.get<string | null>(lastWeeklyKey(uid!, id))) || week;
-    const back = lbKeys(lastDay, lastWeek);
+    const lastDay   = (await kv.get<string | null>(lastDailyKey(uid!, id)))   || day;
+    const lastWeek  = (await kv.get<string | null>(lastWeeklyKey(uid!, id)))  || week;
+    const lastMonth = (await kv.get<string | null>(lastMonthlyKey(uid!, id))) || month; // NEW
+    const back = lbKeys(lastDay, lastWeek, lastMonth);
 
-    await Promise.all([
-      (kv as any).zincrby(back.artDaily, -1, id),
-      (kv as any).zincrby(back.artWeekly, -1, id),
-    ]);
+    const ops = [
+      (kv as any).zincrby(back.artDaily,   -1, id),
+      (kv as any).zincrby(back.artWeekly,  -1, id),
+      (kv as any).zincrby(back.artMonthly, -1, id), // NEW
+    ];
     if (author) {
-      await Promise.all([
-        (kv as any).zincrby(back.creatorDaily, -1, author),
-        (kv as any).zincrby(back.creatorWeekly, -1, author),
-      ]);
+      ops.push(
+        (kv as any).zincrby(back.creatorDaily,   -1, author),
+        (kv as any).zincrby(back.creatorWeekly,  -1, author),
+        (kv as any).zincrby(back.creatorMonthly, -1, author), // NEW
+      );
     }
+    await Promise.all(ops);
 
     await Promise.all([
       kv.del(lastDailyKey(uid!, id)),
       kv.del(lastWeeklyKey(uid!, id)),
+      kv.del(lastMonthlyKey(uid!, id)), // NEW
     ]);
   } else {
-    // LIKE
+    // === LIKE ===
     count = await kv.incr(cKey(id));
     await kv.incr(userFlagKey);
     liked = true;
 
-    await Promise.all([
-      (kv as any).zincrby(keys.artDaily, 1, id),
-      (kv as any).zincrby(keys.artWeekly, 1, id),
-    ]);
+    const ops = [
+      (kv as any).zincrby(keys.artDaily,   1, id),
+      (kv as any).zincrby(keys.artWeekly,  1, id),
+      (kv as any).zincrby(keys.artMonthly, 1, id), // NEW
+    ];
     if (author) {
-      await Promise.all([
-        (kv as any).zincrby(keys.creatorDaily, 1, author),
-        (kv as any).zincrby(keys.creatorWeekly, 1, author),
-      ]);
+      ops.push(
+        (kv as any).zincrby(keys.creatorDaily,   1, author),
+        (kv as any).zincrby(keys.creatorWeekly,  1, author),
+        (kv as any).zincrby(keys.creatorMonthly, 1, author), // NEW
+      );
     }
+    await Promise.all(ops);
 
     await Promise.all([
       kv.set(lastDailyKey(uid!, id), day),
       kv.set(lastWeeklyKey(uid!, id), week),
-      // index periods for history
+      kv.set(lastMonthlyKey(uid!, id), month), // NEW
+      // index periods untuk history
       (kv as any).sadd("lb:index:daily", day),
       (kv as any).sadd("lb:index:weekly", week),
+      (kv as any).sadd("lb:index:monthly", month), // NEW
     ]);
   }
 
