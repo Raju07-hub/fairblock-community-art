@@ -1,159 +1,197 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
-type ApiResp =
-  | {
-      success: true;
-      id: string;
-      url: string;
-      metaUrl: string;
-      ownerTokenHash: string;
-      deleteToken: string;
-    }
-  | { success: false; error: string };
-
-function cx(...c: (string | false | undefined)[]) {
-  return c.filter(Boolean).join(" ");
+function normAt(v: string) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  return s.startsWith("@") ? s : `@${s}`;
 }
 
 export default function SubmitPage() {
+  const router = useRouter();
+
   const [title, setTitle] = useState("");
   const [x, setX] = useState("");
   const [discord, setDiscord] = useState("");
   const [postUrl, setPostUrl] = useState(""); // NEW
   const [file, setFile] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  function validPostUrl(s: string) {
-    if (!s) return true; // optional
-    try {
-      const u = new URL(s);
-      return u.protocol === "http:" || u.protocol === "https:";
-    } catch {
-      return false;
+  const onPick = (f?: File | null) => {
+    if (!f) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(f.type)) {
+      alert("Please choose PNG, JPG, or WEBP.");
+      return;
     }
-  }
+    if (f.size > 8 * 1024 * 1024) {
+      alert("Max file size is 8MB.");
+      return;
+    }
+    setFile(f);
+  };
 
-  async function onSubmit(e: React.FormEvent) {
+  const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setMsg(null);
+    e.stopPropagation();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    onPick(f || null);
+  }, []);
 
-    if (!title.trim()) return setMsg("Title is required.");
-    if (!file) return setMsg("Please choose an image.");
-    if (!validPostUrl(postUrl)) return setMsg("Your Art Post must be a valid URL.");
-
-    const fd = new FormData();
-    fd.append("title", title.trim());
-    if (x.trim()) fd.append("x", x.trim());
-    if (discord.trim()) fd.append("discord", discord.trim());
-    if (postUrl.trim()) fd.append("postUrl", postUrl.trim()); // NEW
-    fd.append("file", file);
+  const onSubmit = async () => {
+    if (busy) return;
+    if (!title.trim()) return alert("Title is required.");
+    if (!file) return alert("Please choose an image.");
 
     setBusy(true);
     try {
-      const r = await fetch("/api/submit", { method: "POST", body: fd });
-      const j = (await r.json()) as ApiResp;
+      const fd = new FormData();
+      fd.append("title", title.trim());
+      fd.append("x", normAt(x));
+      fd.append("discord", normAt(discord));
+      fd.append("postUrl", postUrl.trim()); // NEW (optional)
+      fd.append("file", file);
 
-      if (!("success" in j) || !j.success) {
-        throw new Error((j as any)?.error || "Upload failed");
+      const res = await fetch("/api/submit", {
+        method: "POST",
+        body: fd,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.error || `${res.status} ${res.statusText}`);
       }
 
-      // 🔐 Save owner credentials so this browser can Edit/Delete later.
-      try {
-        // 1) Map style used by Gallery (required for owner-only buttons)
-        const raw = localStorage.getItem("fairblock:tokens");
-        const map = raw ? JSON.parse(raw) : {};
-        map[j.id] = j.deleteToken;
-        localStorage.setItem("fairblock:tokens", JSON.stringify(map));
+      // simpan token untuk edit/delete di browser ini (legacy + global)
+      const id: string = data.id;
+      const deleteToken: string = data.deleteToken;
+      if (id && deleteToken) {
+        try {
+          const RAW = localStorage.getItem("fairblock:tokens");
+          const map = RAW ? JSON.parse(RAW) : {};
+          map[id] = deleteToken;
+          localStorage.setItem("fairblock:tokens", JSON.stringify(map));
+          localStorage.setItem("fairblock:owner-token", deleteToken);
+        } catch {}
+      }
 
-        // 2) Also keep per-id keys (future compatibility)
-        localStorage.setItem(`fb:token:${j.id}`, j.deleteToken);
-        localStorage.setItem(`fb:ownerHash:${j.id}`, j.ownerTokenHash);
-        localStorage.setItem(`fb:meta:${j.metaUrl}`, j.id);
-      } catch {}
-
-      setMsg("Upload successful! You can find your art in the Gallery.");
-      setTitle("");
-      setX("");
-      setDiscord("");
-      setPostUrl("");
-      setFile(null);
+      alert("Submitted successfully! Thanks for sharing ✨");
+      router.replace(`/gallery?refresh=${Date.now()}`); // langsung ke Gallery terbaru
     } catch (e: any) {
-      setMsg(e?.message || "Upload failed");
+      alert(e?.message || "Submit failed");
     } finally {
       setBusy(false);
     }
-  }
+  };
 
   return (
-    <div className="max-w-2xl mx-auto px-5 py-10">
-      <h1 className="text-2xl font-bold mb-6">Submit Artwork</h1>
+    <div className="max-w-5xl mx-auto px-5 sm:px-6 py-10">
+      {/* Top actions seperti dulu */}
+      <div className="flex items-center gap-3 mb-6">
+        <Link href="/" className="btn">⬅ Back to Home</Link>
+        <Link href="/gallery" className="btn">View Gallery</Link>
+      </div>
 
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div>
-          <label className="block mb-1 text-sm opacity-80">Title *</label>
+      <h1 className="text-3xl font-bold mb-6 text-white/90">Submit Your Art</h1>
+
+      {/* Panel form gaya lama */}
+      <div className="glass rounded-2xl p-5 sm:p-7 border border-white/10">
+        {/* Title */}
+        <label className="block mb-4">
+          <div className="mb-2 text-sm opacity-80">Title</div>
           <input
-            className="input w-full"
+            className="w-full px-4 py-3 rounded-xl bg-white/10 outline-none"
+            placeholder="Title — e.g. Confidential Beam"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="My awesome shroom"
-            required
           />
-        </div>
+        </label>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block mb-1 text-sm opacity-80">X (Twitter) Handle</label>
+        {/* Handles */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <label className="block">
+            <div className="mb-2 text-sm opacity-80">Username X</div>
             <input
-              className="input w-full"
+              className="w-full px-4 py-3 rounded-xl bg-white/10 outline-none"
+              placeholder="e.g. @kanjuro"
               value={x}
               onChange={(e) => setX(e.target.value)}
-              placeholder="@yourhandle"
             />
-          </div>
-          <div>
-            <label className="block mb-1 text-sm opacity-80">Discord</label>
+          </label>
+          <label className="block">
+            <div className="mb-2 text-sm opacity-80">Username Discord</div>
             <input
-              className="input w-full"
+              className="w-full px-4 py-3 rounded-xl bg-white/10 outline-none"
+              placeholder="e.g. name#1234 or username"
               value={discord}
               onChange={(e) => setDiscord(e.target.value)}
-              placeholder="you#1234"
             />
-          </div>
+          </label>
         </div>
 
-        {/* NEW: Your Art Post URL */}
-        <div>
-          <label className="block mb-1 text-sm opacity-80">Your Art Post (X/Twitter)</label>
+        {/* Your Art Post (X/Twitter) — NEW optional */}
+        <label className="block mb-4">
+          <div className="mb-2 text-sm opacity-80">Your Art Post (X/Twitter) — optional</div>
           <input
-            className={cx("input w-full", postUrl && !validPostUrl(postUrl) && "ring-2 ring-red-500")}
+            className="w-full px-4 py-3 rounded-xl bg-white/10 outline-none"
+            placeholder="https://x.com/yourhandle/status/1234567890"
             value={postUrl}
             onChange={(e) => setPostUrl(e.target.value)}
-            placeholder="https://x.com/yourhandle/status/1234567890"
           />
-          <p className="text-xs opacity-60 mt-1">
-            Optional. If provided, your Gallery card will show “Open Art Post”.
-          </p>
-        </div>
+          <div className="text-xs opacity-60 mt-1">
+            If provided, your Gallery card will show “Open Art Post”.
+          </div>
+        </label>
 
-        <div>
-          <label className="block mb-1 text-sm opacity-80">Image (PNG/JPG/WEBP, max 8MB) *</label>
+        {/* Drag & Drop area */}
+        <div
+          className={`rounded-2xl border-2 border-dashed ${
+            dragOver ? "border-white/70" : "border-white/20"
+          } bg-black/20 p-6 sm:p-10 text-center mb-5 transition`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          onClick={() => inputRef.current?.click()}
+          role="button"
+          tabIndex={0}
+        >
+          <p className="mb-2">Drag & drop image here, or click to choose</p>
+          <p className="text-sm opacity-70">
+            Format: PNG / JPG / WEBP — Max 8MB
+          </p>
+
+          {file && (
+            <div className="mt-4 inline-flex items-center gap-2 text-sm">
+              <span className="opacity-80">Selected:</span>
+              <span className="font-medium">{file.name}</span>
+            </div>
+          )}
+
           <input
+            ref={inputRef}
             type="file"
             accept="image/png,image/jpeg,image/webp"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            required
+            hidden
+            onChange={(e) => onPick(e.target.files?.[0] || null)}
           />
         </div>
 
-        {msg && <p className="text-sm">{msg}</p>}
-
-        <button className="btn" disabled={busy}>
-          {busy ? "Uploading…" : "Submit"}
-        </button>
-      </form>
+        <div className="flex gap-3">
+          <button onClick={onSubmit} disabled={busy} className="btn">
+            {busy ? "Submitting…" : "Submit"}
+          </button>
+          <Link href="/gallery" className="btn">Cancel</Link>
+        </div>
+      </div>
     </div>
   );
 }
