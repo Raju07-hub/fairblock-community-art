@@ -15,7 +15,6 @@ function normHandle(v?: string) {
   const noAt = s.replace(/^@/, "");
   return `@${noAt}`;
 }
-
 function headerNoStore() {
   return {
     "cache-control": "no-store, no-cache, must-revalidate",
@@ -25,26 +24,57 @@ function headerNoStore() {
   };
 }
 
-export async function GET() {
+// ---- NEW: coba beberapa prefix & fallback ----
+const CANDIDATE_PREFIXES = [
+  process.env.BLOB_META_PREFIX,       // bisa set di Vercel bila perlu
+  "fairblock/meta/",
+  "fb/meta/",
+  "fairblockcom/meta/",
+].filter(Boolean) as string[];
+
+async function listWithFallback(list: ListFn) {
+  // 1) coba candidate prefixes satu per satu
+  for (const prefix of CANDIDATE_PREFIXES) {
+    const r = await list({
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      prefix,
+      limit: 1000,
+    });
+    if (r.blobs?.length) return { source: `prefix:${prefix}`, blobs: r.blobs };
+  }
+  // 2) fallback tanpa prefix: ambil semuanya lalu filter yang mengandung "/meta/"
+  const rAll = await list({
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+    limit: 1000,
+  });
+  const blobs = (rAll.blobs || []).filter(
+    (b) =>
+      typeof b.pathname === "string" &&
+      /\/meta\/.+\.(json|txt|data)$/i.test(b.pathname)
+  );
+  return { source: "fallback:scan-all", blobs };
+}
+
+export async function GET(req: Request) {
   try {
+    const { searchParams } = new URL(req.url);
+    const debug = searchParams.get("debug") === "1";
+
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json(
-        { success: true, items: [], nextCursor: null, count: 0 },
+        { success: true, items: [], nextCursor: null, count: 0, note: "missing BLOB_READ_WRITE_TOKEN" },
         { headers: headerNoStore() }
       );
     }
 
     const { list } = (await import("@vercel/blob")) as { list: ListFn };
-    const { blobs } = await list({
-      token: process.env.BLOB_READ_WRITE_TOKEN,
-      prefix: "fairblock/meta/",
-      limit: 500,
-    });
+
+    // --- use fallback listing ---
+    const { source, blobs } = await listWithFallback(list);
 
     const bust = Date.now();
-
     const items = await Promise.all(
-      blobs.map(async (b) => {
+      (blobs || []).map(async (b) => {
         try {
           const res = await fetch(`${b.url}?v=${bust}`, { cache: "no-store" });
           if (!res.ok) return null;
@@ -59,7 +89,6 @@ export async function GET() {
             typeof fromMeta === "string" && /^https?:\/\//i.test(fromMeta)
               ? fromMeta
               : "";
-
           if (!meta?.id || !imageUrl) return null;
 
           // normalize createdAt
@@ -92,10 +121,15 @@ export async function GET() {
       return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
     });
 
-    return NextResponse.json(
-      { success: true, items: filtered, nextCursor: null, count: filtered.length },
-      { headers: headerNoStore() }
-    );
+    const payload: any = {
+      success: true,
+      items: filtered,
+      nextCursor: null,
+      count: filtered.length,
+    };
+    if (debug) payload._debug = { source, listed: blobs?.length || 0 };
+
+    return NextResponse.json(payload, { headers: headerNoStore() });
   } catch (e: any) {
     return NextResponse.json(
       { success: false, error: e?.message || "Failed to fetch gallery" },
