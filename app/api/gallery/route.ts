@@ -38,7 +38,7 @@ export async function GET() {
     const { blobs } = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
       prefix: "fairblock/meta/",
-      limit: 500, // cukup tinggi supaya tidak kepotong
+      limit: 500,
     });
 
     const bust = Date.now();
@@ -48,24 +48,35 @@ export async function GET() {
         try {
           const res = await fetch(`${b.url}?v=${bust}`, { cache: "no-store" });
           if (!res.ok) return null;
+          const ctype = res.headers.get("content-type") || "";
+          if (!/application\/json/i.test(ctype)) return null;
+
           const meta = await res.json();
 
-          // Robust image URL: pakai imageUrl lalu fallback ke url; keduanya harus http(s)
-          const fromMeta = (meta?.imageUrl as string) || (meta?.url as string) || "";
+          const fromMeta: string =
+            (meta?.imageUrl as string) || (meta?.url as string) || "";
           const imageUrl =
-            typeof fromMeta === "string" && /^https?:\/\//i.test(fromMeta) ? fromMeta : "";
+            typeof fromMeta === "string" && /^https?:\/\//i.test(fromMeta)
+              ? fromMeta
+              : "";
 
-          // Minimal syarat: ada id & imageUrl agar bisa dirender
           if (!meta?.id || !imageUrl) return null;
+
+          // normalize createdAt
+          let createdAt = "";
+          if (typeof meta.createdAt === "string") createdAt = meta.createdAt;
+          else if (typeof meta.createdAt === "number" && Number.isFinite(meta.createdAt)) {
+            createdAt = new Date(meta.createdAt).toISOString();
+          }
 
           return {
             id: String(meta.id),
-            title: typeof meta.title === "string" ? meta.title : "", // jangan buang item hanya karena title kosong
+            title: typeof meta.title === "string" ? meta.title : "",
             x: normHandle(meta.x),
             discord: normHandle(meta.discord),
             postUrl: typeof meta.postUrl === "string" ? meta.postUrl : "",
             url: imageUrl,
-            createdAt: typeof meta.createdAt === "string" ? meta.createdAt : "", // biar sorter client yang menormalkan
+            createdAt,
             metaUrl: b.url,
             ownerTokenHash: typeof meta.ownerTokenHash === "string" ? meta.ownerTokenHash : "",
           };
@@ -75,7 +86,6 @@ export async function GET() {
       })
     );
 
-    // Urutkan newest dengan toleransi (createdAt kosong akan dianggap 0 di client)
     const filtered = (items.filter(Boolean) as any[]).sort((a, b) => {
       const tb = Date.parse(b.createdAt || "");
       const ta = Date.parse(a.createdAt || "");
