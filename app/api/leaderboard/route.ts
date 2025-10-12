@@ -31,7 +31,7 @@ export async function GET(req: Request) {
     const arr = await (kv as any).zrevrange(key, 0, 99, { withscores: true });
     const pairs = toPairs(arr || []);
 
-    // Join metadata dari gallery agar frontend tidak perlu join manual
+    // Join metadata dari gallery (URL absolut dari req agar work di prod tanpa env)
     const gRes = await fetch(new URL("/api/gallery", req.url), { cache: "no-store" }).catch(() => null);
     const gJson = (await gRes?.json().catch(() => null)) as any;
     const items: any[] = gJson?.items || [];
@@ -50,21 +50,7 @@ export async function GET(req: Request) {
       };
     });
 
-    // Hitung creator by uploads langsung dari gallery
-    const creatorMap = new Map<string, number>();
-    for (const g of items) {
-      const handle = (g.x || "").trim();
-      if (!handle) continue;
-      const key = handle.startsWith("@") ? handle : `@${handle}`;
-      creatorMap.set(key, (creatorMap.get(key) || 0) + 1);
-    }
-
-    const topCreatorsUploads = Array.from(creatorMap.entries())
-      .map(([user, uploads]) => ({ user, uploads }))
-      .sort((a, b) => b.uploads - a.uploads)
-      .slice(0, 20);
-
-    return NextResponse.json({ success: true, topArts, topCreatorsUploads });
+    return NextResponse.json({ success: true, topArts });
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e?.message || "failed" }, { status: 500 });
   }

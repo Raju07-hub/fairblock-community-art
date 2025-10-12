@@ -1,16 +1,16 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type Scope = "weekly" | "monthly";
 type TopItem = { id: string; likes?: number; title?: string; owner?: string; discord?: string; postUrl?: string; url?: string };
-type CreatorUpload = { user: string; uploads: number };
+type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; metaUrl?: string; postUrl?: string };
 
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("weekly");
   const [loading, setLoading] = useState(true);
   const [topArts, setTopArts] = useState<TopItem[]>([]);
-  const [topCreators, setTopCreators] = useState<CreatorUpload[]>([]);
+  const [gallery, setGallery] = useState<GalleryItem[]>([]);
 
   const pill = (active: boolean) => `btn px-4 py-1 rounded-full text-sm ${active ? "bg-[#3aaefc]/30" : "bg-white/10"}`;
   const btn = "btn px-4 py-1 rounded-full text-sm";
@@ -23,17 +23,41 @@ export default function LeaderboardPage() {
       const r = await fetch(`/api/leaderboard?range=${scope}`, { cache: "no-store" });
       const j = await r.json();
       setTopArts(j?.topArts || []);
-      setTopCreators(j?.topCreatorsUploads || []);
     } finally {
       setLoading(false);
     }
   }
+  async function loadGallery() {
+    try {
+      const r = await fetch(`/api/gallery`, { cache: "no-store" });
+      const j = await r.json();
+      setGallery(j?.items || []);
+    } catch {}
+  }
 
+  useEffect(() => { loadGallery(); }, []);
   useEffect(() => { loadLB(); }, [scope]);
+
+  // realtime polling 10s untuk Top Art
   useEffect(() => {
     const t = setInterval(loadLB, 10000);
     return () => clearInterval(t);
   }, [scope]);
+
+  // creators by uploads (dari gallery, bukan dari KV)
+  const topCreatorsUploads = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of gallery) {
+      const handle = (it.x || "").trim();
+      if (!handle) continue;
+      const key = handle.startsWith("@") ? handle : `@${handle}`;
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .map(([user, uploads]) => ({ user, uploads }))
+      .sort((a, b) => b.uploads - a.uploads)
+      .slice(0, 10);
+  }, [gallery]);
 
   const resetLabel =
     scope === "weekly"
@@ -103,11 +127,11 @@ export default function LeaderboardPage() {
             </div>
           </section>
 
-          {/* 👨‍🎨 Top Creators by Uploads */}
+          {/* 👨‍🎨 Top Creators by Uploads (client-side dari /api/gallery) */}
           <section>
             <h2 className={heading}>🧬 Top Creators (by uploads)</h2>
             <div className="space-y-3">
-              {topCreators.slice(0, 10).map((c, idx) => {
+              {topCreatorsUploads.map((c, idx) => {
                 const user = c.user;
                 const galleryLink = `/gallery?q=${encodeURIComponent(user)}`;
                 const xUrl = `https://x.com/${user.replace(/^@/, "")}`;
@@ -130,7 +154,7 @@ export default function LeaderboardPage() {
                   </div>
                 );
               })}
-              {!topCreators.length && <div className="opacity-70">No creators yet.</div>}
+              {!topCreatorsUploads.length && <div className="opacity-70">No creators yet.</div>}
             </div>
           </section>
         </div>
