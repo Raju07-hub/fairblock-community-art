@@ -14,25 +14,21 @@ function toPairs(a: any[]) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const range = (searchParams.get("range") || "weekly").toLowerCase(); // weekly | monthly
+    const range = (searchParams.get("range") || "weekly").toLowerCase();
 
     const key =
-      range === "weekly"
-        ? `lb:art:weekly:${weekSatUTC()}`
-        : range === "monthly"
-        ? `lb:art:monthly:${ym()}`
-        : null;
+      range === "weekly"  ? `lb:art:weekly:${weekSatUTC()}` :
+      range === "monthly" ? `lb:art:monthly:${ym()}` : null;
 
     if (!key) {
       return NextResponse.json({ success: false, error: "range must be 'weekly' or 'monthly'" }, { status: 400 });
     }
 
-    // Ambil ranking top art by likes
     const arr = await (kv as any).zrevrange(key, 0, 99, { withscores: true });
     const pairs = toPairs(arr || []);
 
-    // Join metadata dari gallery (URL absolut dari req agar work di prod tanpa env)
-    const gRes = await fetch(new URL("/api/gallery", req.url), { cache: "no-store" }).catch(() => null);
+    // join metadata gallery
+    const gRes  = await fetch(new URL("/api/gallery", req.url), { cache: "no-store" }).catch(() => null);
     const gJson = (await gRes?.json().catch(() => null)) as any;
     const items: any[] = gJson?.items || [];
     const map = new Map(items.map(i => [String(i.id), i]));

@@ -12,17 +12,18 @@ function toPairs(a: any[]) {
 }
 
 export async function GET() {
-  const weekKey = `lb:art:weekly:${weekSatUTC()}`;
-  const monthKey = `lb:art:monthly:${ym()}`;
+  const wArtKey = `lb:art:weekly:${weekSatUTC()}`;
+  const mArtKey = `lb:art:monthly:${ym()}`;
 
-  const [w, m] = await Promise.all([
-    (kv as any).zrevrange(weekKey, 0, 50, { withscores: true }),
-    (kv as any).zrevrange(monthKey, 0, 50, { withscores: true }),
+  const [wA, mA] = await Promise.all([
+    (kv as any).zrevrange(wArtKey, 0, 50, { withscores: true }),
+    (kv as any).zrevrange(mArtKey, 0, 50, { withscores: true }),
   ]);
 
   return NextResponse.json({
-    weekKey, monthKey,
-    weekly: toPairs(w || []),
-    monthly: toPairs(m || []),
+    weekKeyArt: wArtKey,
+    monthKeyArt: mArtKey,
+    weeklyArt: toPairs(wA || []),
+    monthlyArt: toPairs(mA || []),
   });
 }

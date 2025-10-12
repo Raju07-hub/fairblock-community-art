@@ -38,13 +38,10 @@ export default function LeaderboardPage() {
   useEffect(() => { loadGallery(); }, []);
   useEffect(() => { loadLB(); }, [scope]);
 
-  // realtime polling 10s untuk Top Art
-  useEffect(() => {
-    const t = setInterval(loadLB, 10000);
-    return () => clearInterval(t);
-  }, [scope]);
+  // polling 10s untuk realtime Top Art
+  useEffect(() => { const t = setInterval(loadLB, 10000); return () => clearInterval(t); }, [scope]);
 
-  // creators by uploads (dari gallery, bukan dari KV)
+  // creators by uploads dari gallery
   const topCreatorsUploads = useMemo(() => {
     const map = new Map<string, number>();
     for (const it of gallery) {
@@ -127,7 +124,7 @@ export default function LeaderboardPage() {
             </div>
           </section>
 
-          {/* 👨‍🎨 Top Creators by Uploads (client-side dari /api/gallery) */}
+          {/* 👨‍🎨 Top Creators by Uploads */}
           <section>
             <h2 className={heading}>🧬 Top Creators (by uploads)</h2>
             <div className="space-y-3">
