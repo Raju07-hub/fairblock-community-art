@@ -13,6 +13,7 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
+  ownerTokenHash?: string; // NEW
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
@@ -21,16 +22,34 @@ function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
 }
-function getOwnerTokenFor(id: string): string | null {
-  try {
-    const raw = localStorage.getItem("fairblock:tokens");
-    if (!raw) return null;
-    const map = JSON.parse(raw || "{}");
-    return map?.[id] || null;
-  } catch {
-    return null;
-  }
+
+// --- utils
+async function sha256Hex(s: string) {
+  const enc = new TextEncoder().encode(s);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  const bytes = Array.from(new Uint8Array(buf));
+  return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+/** Ambil semua token yang pernah tersimpan (legacy map + global) */
+function getAllLocalTokens(): string[] {
+  const out: string[] = [];
+  try {
+    const rawMap = localStorage.getItem("fairblock:tokens");
+    if (rawMap) {
+      const map = JSON.parse(rawMap || "{}");
+      for (const k of Object.keys(map)) {
+        if (map[k]) out.push(String(map[k]));
+      }
+    }
+  } catch {}
+  try {
+    const global = localStorage.getItem("fairblock:owner-token");
+    if (global) out.push(global);
+  } catch {}
+  return Array.from(new Set(out));
+}
+
 async function copyTextForce(text: string) {
   if (!text) return false;
   try {
@@ -62,10 +81,24 @@ export default function GalleryClient() {
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
+  // simpan hash semua token lokal sekali saja
+  const [localTokenHashes, setLocalTokenHashes] = useState<Set<string>>(new Set());
+
+  // lightbox
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
   const [enterPhase, setEnterPhase] = useState(false);
 
+  // hitung hash token lokal
+  useEffect(() => {
+    (async () => {
+      const tokens = getAllLocalTokens();
+      const hashes = await Promise.all(tokens.map((t) => sha256Hex(t)));
+      setLocalTokenHashes(new Set(hashes));
+    })();
+  }, []);
+
+  // load gallery
   async function load() {
     setLoading(true);
     try {
@@ -101,13 +134,19 @@ export default function GalleryClient() {
     }
   }
 
+  /** Apakah item ini milik user berdasar kecocokan hash token lokal */
+  function isOwner(it: GalleryItem): boolean {
+    if (!it.ownerTokenHash) return false;
+    return localTokenHashes.has(it.ownerTokenHash);
+  }
+
   const filtered = useMemo(() => {
     let list = items;
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter((it) => [it.title, it.x, it.discord].join(" ").toLowerCase().includes(q));
     }
-    if (onlyMine) list = list.filter((it) => !!getOwnerTokenFor(it.id));
+    if (onlyMine) list = list.filter((it) => isOwner(it));
     list = list
       .slice()
       .sort((a, b) =>
@@ -116,8 +155,9 @@ export default function GalleryClient() {
           : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
       );
     return list;
-  }, [items, query, onlyMine, sort]);
+  }, [items, query, onlyMine, sort, localTokenHashes]);
 
+  // --- Lightbox helpers
   function openAt(i: number) {
     setAnimDir(null);
     setSelectedIndex(i);
@@ -155,7 +195,7 @@ export default function GalleryClient() {
 
   return (
     <div className="max-w-7xl mx-auto px-5 sm:px-6 py-10 relative">
-      {/* === Action bar === */}
+      {/* Action bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex gap-3">
           <Link href="/" className="btn">⬅ Back Home</Link>
@@ -208,14 +248,12 @@ export default function GalleryClient() {
             const xUrl = xHandle ? `https://x.com/${xHandle.replace(/^@/, "")}` : "";
             const openPost =
               it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl) ? it.postUrl : "";
-            const isOwner = !!getOwnerTokenFor(it.id);
+            const owner = isOwner(it);
 
             return (
-              <div
-                key={it.id}
-                className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]"
-              >
+              <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
                 <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
+                  {/* TAMPILKAN UTUH (tidak terpotong) */}
                   <div className="w-full aspect-[4/3] bg-black/10 flex items-center justify-center overflow-hidden">
                     <img
                       src={it.url}
@@ -223,9 +261,7 @@ export default function GalleryClient() {
                       className="max-w-full max-h-full w-auto h-auto object-contain"
                     />
                   </div>
-
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
-
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleLike(it); }}
                     aria-pressed={like.liked}
@@ -275,30 +311,26 @@ export default function GalleryClient() {
                     </button>
                   </div>
 
-                  {isOwner && (
+                  {owner && (
                     <div className="mt-3 flex gap-2">
                       <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
                       <button
                         onClick={async () => {
-                          const token = getOwnerTokenFor(it.id);
-                          if (!token) return alert("Delete token not found. Use the same browser you used to submit.");
+                          const candidateTokens = getAllLocalTokens();
+                          if (candidateTokens.length === 0) return alert("Owner token not found in this browser.");
                           if (!confirm("Delete this artwork?")) return;
-
                           try {
                             const res = await fetch(`/api/art/${it.id}`, {
                               method: "DELETE",
                               headers: {
                                 "content-type": "application/json",
-                                "x-owner-token": token,
+                                "x-owner-token": candidateTokens[0],
                               },
                               body: JSON.stringify({ metaUrl: it.metaUrl }),
                             });
                             const j = await res.json();
-                            if (j?.success) {
-                              setItems((prev) => prev.filter((x) => x.id !== it.id));
-                            } else {
-                              alert(j?.error || "Delete failed");
-                            }
+                            if (j?.success) setItems((prev) => prev.filter((x) => x.id !== it.id));
+                            else alert(j?.error || "Delete failed");
                           } catch (e: any) {
                             alert(e?.message || "Delete error");
                           }
@@ -316,7 +348,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* === Lightbox === */}
+      {/* Lightbox */}
       {selectedIndex !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
@@ -368,7 +400,6 @@ export default function GalleryClient() {
               </button>
             </div>
 
-            {/* Caption */}
             {(() => {
               const sel = filtered[selectedIndex];
               const xHandle = sel.x ? (sel.x.startsWith("@") ? sel.x : `@${sel.x}`) : "";
