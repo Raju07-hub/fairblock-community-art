@@ -1,16 +1,16 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 type Scope = "weekly" | "monthly";
-type TopItem = { id: string; score?: number; likes?: number; title?: string; owner?: string; discord?: string; postUrl?: string; url?: string; };
-type GalleryItem = { id: string; title: string; url: string; x?: string; discord?: string; metaUrl?: string; postUrl?: string };
+type TopItem = { id: string; likes?: number; title?: string; owner?: string; discord?: string; postUrl?: string; url?: string };
+type CreatorUpload = { user: string; uploads: number };
 
 export default function LeaderboardPage() {
   const [scope, setScope] = useState<Scope>("weekly");
   const [loading, setLoading] = useState(true);
   const [topArts, setTopArts] = useState<TopItem[]>([]);
-  const [gallery, setGallery] = useState<GalleryItem[]>([]);
+  const [topCreators, setTopCreators] = useState<CreatorUpload[]>([]);
 
   const pill = (active: boolean) => `btn px-4 py-1 rounded-full text-sm ${active ? "bg-[#3aaefc]/30" : "bg-white/10"}`;
   const btn = "btn px-4 py-1 rounded-full text-sm";
@@ -22,58 +22,18 @@ export default function LeaderboardPage() {
     try {
       const r = await fetch(`/api/leaderboard?range=${scope}`, { cache: "no-store" });
       const j = await r.json();
-      setTopArts((j?.topArts || []).map((x: any) => ({ id: x.id, likes: x.score })));
+      setTopArts(j?.topArts || []);
+      setTopCreators(j?.topCreatorsUploads || []);
     } finally {
       setLoading(false);
     }
   }
-  async function loadGallery() {
-    try {
-      const r = await fetch(`/api/gallery`, { cache: "no-store" });
-      const j = await r.json();
-      setGallery(j?.items || []);
-    } catch {}
-  }
 
-  useEffect(() => { loadGallery(); }, []);
-  useEffect(() => { loadLB(); /* eslint-disable-next-line */ }, [scope]);
-
-  // realtime polling 10s
+  useEffect(() => { loadLB(); }, [scope]);
   useEffect(() => {
     const t = setInterval(loadLB, 10000);
     return () => clearInterval(t);
   }, [scope]);
-
-  // join metadata
-  const rows = useMemo(() => {
-    const map = new Map(gallery.map(g => [g.id, g]));
-    return topArts.map(t => {
-      const g = map.get(t.id);
-      return {
-        ...t,
-        title: g?.title || t.title || "Untitled",
-        url: g?.url || t.url,
-        owner: g?.x || t.owner,
-        discord: g?.discord || t.discord,
-        postUrl: g?.postUrl || t.postUrl,
-      };
-    });
-  }, [topArts, gallery]);
-
-  // creators by uploads
-  const topCreators = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const it of gallery) {
-      const handle = (it.x || "").trim();
-      if (!handle) continue;
-      const key = handle.startsWith("@") ? handle : `@${handle}`;
-      map.set(key, (map.get(key) || 0) + 1);
-    }
-    return Array.from(map.entries())
-      .map(([user, uploads]) => ({ user, uploads }))
-      .sort((a, b) => b.uploads - a.uploads)
-      .slice(0, 10);
-  }, [gallery]);
 
   const resetLabel =
     scope === "weekly"
@@ -105,11 +65,11 @@ export default function LeaderboardPage() {
         <p className="opacity-70">Loading…</p>
       ) : (
         <div className="grid grid-cols-1 md:[grid-template-columns:minmax(0,2.2fr)_minmax(0,1fr)] gap-6">
-          {/* Top Art */}
+          {/* 🏆 Top Art */}
           <section>
             <h2 className={heading}>🏆 Top Art ({scope.toUpperCase()})</h2>
             <div className="space-y-3">
-              {rows.slice(0, 10).map((t, idx) => {
+              {topArts.slice(0, 10).map((t, idx) => {
                 const title = t.title ?? "Untitled";
                 const xHandle = t.owner || "";
                 const discord = t.discord || "";
@@ -139,23 +99,24 @@ export default function LeaderboardPage() {
                   </div>
                 );
               })}
-              {!rows?.length && <div className="opacity-70">No data for this period yet.</div>}
+              {!topArts?.length && <div className="opacity-70">No data for this period yet.</div>}
             </div>
           </section>
 
-          {/* Top Creators */}
+          {/* 👨‍🎨 Top Creators by Uploads */}
           <section>
             <h2 className={heading}>🧬 Top Creators (by uploads)</h2>
             <div className="space-y-3">
-              {topCreators.map((c, idx) => {
-                const galleryLink = `/gallery?q=${encodeURIComponent(c.user)}`;
-                const xUrl = `https://x.com/${c.user.replace(/^@/, "")}`;
+              {topCreators.slice(0, 10).map((c, idx) => {
+                const user = c.user;
+                const galleryLink = `/gallery?q=${encodeURIComponent(user)}`;
+                const xUrl = `https://x.com/${user.replace(/^@/, "")}`;
                 return (
-                  <div key={c.user} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
+                  <div key={user} className="flex items-center justify-between bg-white/5 rounded-xl p-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="w-6 text-center opacity-70 text-sm">{idx + 1}.</span>
                       <div className="min-w-0">
-                        <div className="font-medium truncate text-[15px]">{c.user}</div>
+                        <div className="font-medium truncate text-[15px]">{user}</div>
                         <div className="text-xs opacity-60">Uploads: {c.uploads}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
                           <Link href={galleryLink} className="btn px-3 py-1 rounded-full text-xs">Search on Gallery</Link>
