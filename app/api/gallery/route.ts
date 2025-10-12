@@ -58,7 +58,7 @@ export async function GET() {
             url: imageUrl,
             createdAt: String(meta.createdAt || ""),
             metaUrl: b.url,
-            ownerTokenHash: meta.ownerTokenHash ? String(meta.ownerTokenHash) : undefined, // ← NEW
+            ownerTokenHash: meta.ownerTokenHash ? String(meta.ownerTokenHash) : undefined, // expose ke FE
           };
         } catch {
           return null;

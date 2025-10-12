@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Heart, X, ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
 
-/* ---------------- Types ---------------- */
 type GalleryItem = {
   id: string;
   title: string;
@@ -14,12 +13,11 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
-  ownerTokenHash?: string; // <-- penting untuk karya baru/hasil klaim
+  ownerTokenHash?: string; // dipakai untuk deteksi owner modern
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
 
-/* ---------------- Utils ---------------- */
 function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
@@ -35,7 +33,6 @@ function getLegacyTokenFor(id: string): string | null {
     return null;
   }
 }
-
 function getGlobalOwnerToken(): string | null {
   try {
     return localStorage.getItem("fairblock:owner-token");
@@ -43,7 +40,6 @@ function getGlobalOwnerToken(): string | null {
     return null;
   }
 }
-
 function getAllLocalTokens(): string[] {
   const out: string[] = [];
   const g = getGlobalOwnerToken();
@@ -57,7 +53,6 @@ function getAllLocalTokens(): string[] {
   } catch {}
   return Array.from(new Set(out));
 }
-
 async function sha256Hex(s: string) {
   const enc = new TextEncoder().encode(s);
   const buf = await crypto.subtle.digest("SHA-256", enc);
@@ -88,7 +83,6 @@ async function copyTextForce(text: string) {
   }
 }
 
-/* ---------------- Component ---------------- */
 export default function GalleryClient() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [likes, setLikes] = useState<LikeMap>({});
@@ -97,7 +91,6 @@ export default function GalleryClient() {
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
-  // token hashes (buat cocokkan ownerTokenHash dari server)
   const [localTokenHashes, setLocalTokenHashes] = useState<Set<string>>(new Set());
 
   // lightbox
@@ -137,7 +130,6 @@ export default function GalleryClient() {
     load();
   }, []);
 
-  // like
   async function toggleLike(it: GalleryItem) {
     const author = at(it.x) || at(it.discord);
     const j = await fetch("/api/like", {
@@ -150,18 +142,10 @@ export default function GalleryClient() {
     }
   }
 
-  // owner check:
-  // - prioritas ownerTokenHash vs hash token lokal
-  // - fallback legacy token per-ID
   function isOwner(it: GalleryItem): boolean {
     if (it.ownerTokenHash) return localTokenHashes.has(it.ownerTokenHash);
     return !!getLegacyTokenFor(it.id);
   }
-
-  // tombol "Claim" tampil bila:
-  // - belum owner
-  // - meta belum punya ownerTokenHash
-  // - browser punya minimal satu token (global atau legacy per id)
   function canClaim(it: GalleryItem): boolean {
     if (isOwner(it)) return false;
     if (it.ownerTokenHash) return false;
@@ -180,16 +164,14 @@ export default function GalleryClient() {
       const res = await fetch(`/api/art/${it.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, metaUrl: it.metaUrl, patch: {} }), // patch kosong -> hanya isi ownerTokenHash
+        body: JSON.stringify({ token, metaUrl: it.metaUrl, patch: {} }),
       });
       const j = await res.json();
       if (!res.ok || j?.success === false) throw new Error(j?.error || "Claim failed");
 
-      // update state: set ownerTokenHash agar tombol Edit/Delete muncul
+      // update state
       const newHash = await sha256Hex(token);
-      setItems((prev) =>
-        prev.map((g) => (g.id === it.id ? { ...g, ownerTokenHash: newHash } : g))
-      );
+      setItems((prev) => prev.map((g) => (g.id === it.id ? { ...g, ownerTokenHash: newHash } : g)));
       setLocalTokenHashes((s) => new Set(s).add(newHash));
       alert("Ownership claimed ✔");
     } catch (e: any) {
@@ -214,7 +196,6 @@ export default function GalleryClient() {
     return list;
   }, [items, query, onlyMine, sort, localTokenHashes]);
 
-  // lightbox helpers
   function openAt(i: number) { setAnimDir(null); setSelectedIndex(i); }
   function closeLightbox() { setSelectedIndex(null); }
   function prevImage() { if (selectedIndex === null) return; setAnimDir("left"); setSelectedIndex((i) => (i! > 0 ? i! - 1 : filtered.length - 1)); }
@@ -279,12 +260,12 @@ export default function GalleryClient() {
             const openPost =
               it.postUrl && /^https?:\/\/(x\.com|twitter\.com)\//i.test(it.postUrl) ? it.postUrl : "";
             const owner = isOwner(it);
-            const claimable = canClaim(it);
+            const claimable = !owner && !it.ownerTokenHash && (getGlobalOwnerToken() || getLegacyTokenFor(it.id));
 
             return (
               <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
                 <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
-                  {/* Gambar ori, tidak crop */}
+                  {/* gambar ori: tidak crop */}
                   <div className="w-full aspect-[4/3] bg-black/10 flex items-center justify-center overflow-hidden">
                     <img
                       src={it.url}
@@ -343,7 +324,6 @@ export default function GalleryClient() {
                     </button>
                   </div>
 
-                  {/* Owner controls */}
                   <div className="mt-3 flex gap-2 flex-wrap">
                     {owner && (
                       <>
@@ -422,14 +402,26 @@ export default function GalleryClient() {
                 className="max-h-[70vh] w-auto rounded-xl shadow-2xl object-contain"
               />
 
-              <button className="absolute top-3 right-3 bg-white/20 hover:bg-white/30 rounded-full p-2" onClick={closeLightbox} aria-label="Close preview">
+              <button
+                className="absolute top-3 right-3 bg-white/20 hover:bg-white/30 rounded-full p-2"
+                onClick={closeLightbox}
+                aria-label="Close preview"
+              >
                 <X className="w-6 h-6 text-white" />
               </button>
 
-              <button className="absolute left-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full" onClick={prevImage} aria-label="Previous artwork">
+              <button
+                className="absolute left-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
+                onClick={prevImage}
+                aria-label="Previous artwork"
+              >
                 <ChevronLeft className="w-6 h-6" />
               </button>
-              <button className="absolute right-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full" onClick={nextImage} aria-label="Next artwork">
+              <button
+                className="absolute right-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
+                onClick={nextImage}
+                aria-label="Next artwork"
+              >
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
@@ -453,7 +445,12 @@ export default function GalleryClient() {
                     <div className="font-semibold">{sel.title}</div>
                     <div className="text-sm text-white/70 mt-1">
                       {xHandle && (
-                        <a href={xUrl} target="_blank" rel="noreferrer" className="underline text-sky-300 hover:text-sky-200">
+                        <a
+                          href={xUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline text-sky-300 hover:text-sky-200"
+                        >
                           {xHandle}
                         </a>
                       )}

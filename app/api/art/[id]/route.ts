@@ -7,10 +7,12 @@ import { createHash } from "crypto";
 import { del as blobDel, put as blobPut } from "@vercel/blob";
 
 type Params = { id: string };
+
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const normHandle = (v?: string) => (v ? "@" + String(v).trim().replace(/^@/, "") : "");
 const normPostUrl = (u?: string) => (u && /^https?:\/\//i.test(u) ? u : "");
 
+/* ---------- OPTIONS (preflight) ---------- */
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
@@ -21,6 +23,7 @@ export async function OPTIONS() {
   });
 }
 
+/* ---------- DELETE: hapus image + meta ---------- */
 export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> }) {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -45,7 +48,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> })
     const ok = !!provided && (provided === meta.ownerTokenHash || sha256(provided) === meta.ownerTokenHash);
     if (!ok) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
-    const files = [metaUrl];
+    const files: string[] = [metaUrl];
     if (meta?.imageUrl) files.push(meta.imageUrl);
     await blobDel(files, { token: process.env.BLOB_READ_WRITE_TOKEN! });
 
@@ -55,7 +58,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> })
   }
 }
 
-/* ---------- EDIT (PUT/POST/PATCH) ---------- */
+/* ---------- EDIT handler (PUT/POST/PATCH) + FIRST-CLAIM support ---------- */
 async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -65,6 +68,7 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
     if (!id) return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
 
     const raw = await req.json().catch(() => ({} as any));
+    // dukung 2 bentuk payload: flat & nested { patch: {...} }
     const metaUrl: string = raw?.metaUrl || raw?.patch?.metaUrl || "";
     const provided =
       req.headers.get("x-owner-token") ||
@@ -80,21 +84,33 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
 
     if (!metaUrl) return NextResponse.json({ success: false, error: "Missing metaUrl" }, { status: 400 });
 
+    // baca meta lama
     const metaRes = await fetch(metaUrl, { cache: "no-store" });
     if (!metaRes.ok) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     const old = await metaRes.json();
 
-    const ok =
-      !!provided &&
-      (provided === old.ownerTokenHash || sha256(provided) === old.ownerTokenHash);
-    if (!ok && old.ownerTokenHash) {
+    // --- AUTH ---
+    // Jika sudah ada ownerTokenHash -> wajib cocok.
+    // Jika BELUM ADA -> izinkan "first-claim" bila ada token: hash token jadi ownerTokenHash.
+    let authorized = false;
+    let nextOwnerHash: string | undefined = old.ownerTokenHash;
+
+    if (old.ownerTokenHash) {
+      authorized =
+        !!provided &&
+        (provided === old.ownerTokenHash || sha256(provided) === old.ownerTokenHash);
+    } else {
+      if (provided) {
+        authorized = true;
+        nextOwnerHash = sha256(provided);
+      }
+    }
+
+    if (!authorized) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    // MIGRASI: kalau meta lama belum punya ownerTokenHash, dan ada token 'provided', isi sekarang
-    const ensuredOwnerHash =
-      old.ownerTokenHash || (provided ? sha256(provided) : undefined);
-
+    // meta baru
     const nextMeta = {
       id: old.id,
       title: String(title ?? old.title).trim(),
@@ -103,7 +119,7 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
       postUrl: normPostUrl(postUrl ?? old.postUrl),
       imageUrl: old.imageUrl,
       createdAt: old.createdAt,
-      ownerTokenHash: ensuredOwnerHash, // ← pastikan terisi setelah migrasi
+      ownerTokenHash: nextOwnerHash,
     };
 
     await blobPut(`fairblock/meta/${id}.json`, Buffer.from(JSON.stringify(nextMeta)), {
