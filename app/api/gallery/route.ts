@@ -1,3 +1,4 @@
+// app/api/gallery/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ function normHandle(v?: string) {
 
 export async function GET() {
   try {
+    // Jika token tidak diset, return kosong agar tidak error
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json(
         { success: true, items: [], nextCursor: null, count: 0 },
@@ -30,6 +32,7 @@ export async function GET() {
       );
     }
 
+    // === Ambil list meta blobs dari Vercel Blob ===
     const { list } = (await import("@vercel/blob")) as { list: ListFn };
     const { blobs } = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
@@ -39,6 +42,7 @@ export async function GET() {
 
     const bust = Date.now();
 
+    // === Ambil isi tiap meta.json dan bentuk array items ===
     const items = await Promise.all(
       blobs.map(async (b) => {
         try {
@@ -58,7 +62,7 @@ export async function GET() {
             url: imageUrl,
             createdAt: String(meta.createdAt || ""),
             metaUrl: b.url,
-            ownerTokenHash: String(meta.ownerTokenHash || ""), // ← penting utk matching via hash
+            ownerTokenHash: String(meta.ownerTokenHash || ""), // ← penting untuk auto rebind token lama
           };
         } catch {
           return null;
@@ -66,12 +70,14 @@ export async function GET() {
       })
     );
 
+    // === Urutkan berdasarkan tanggal terbaru ===
     const filtered = (items.filter(Boolean) as any[]).sort(
       (a, b) =>
         (new Date(b.createdAt).getTime() || 0) -
         (new Date(a.createdAt).getTime() || 0)
     );
 
+    // === Return response JSON tanpa cache ===
     return NextResponse.json(
       { success: true, items: filtered, nextCursor: null, count: filtered.length },
       {

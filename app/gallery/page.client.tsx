@@ -1,4 +1,3 @@
-// app/gallery/page.client.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -14,6 +13,7 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
+  ownerTokenHash?: string; // ← new
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
@@ -22,109 +22,16 @@ function at(x?: string) {
   if (!x) return "";
   return x.startsWith("@") ? x : `@${x}`;
 }
-
-/* ====== TOKEN STORAGE (compat) ====== */
-function readTokenMap(): Record<string, string> {
+function getOwnerTokenFor(id: string): string | null {
   try {
     const raw = localStorage.getItem("fairblock:tokens");
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return null;
+    const map = JSON.parse(raw || "{}");
+    return map?.[id] || null;
   } catch {
-    return {};
+    return null;
   }
 }
-
-function writeTokenMap(map: Record<string, string>) {
-  try {
-    localStorage.setItem("fairblock:tokens", JSON.stringify(map));
-  } catch {}
-}
-
-function getOwnerTokenFor(id: string): string | null {
-  const m = readTokenMap();
-  return m[id] || null;
-}
-
-/* ====== CRYPTO ====== */
-async function sha256Hex(str: string): Promise<string> {
-  const enc = new TextEncoder().encode(str);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  const arr = Array.from(new Uint8Array(buf));
-  return arr.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/**
- * Rebind otomatis: pakai token lama (tanpa id) → hashing,
- * lalu cocokkan dengan ownerTokenHash di meta setiap karya.
- * Jika cocok, simpan map id -> token ke `fairblock:tokens`.
- */
-async function rebindLegacyTokens(items: GalleryItem[]) {
-  // 1) Ambil seluruh token lama (bisa format {id: token} lama, atau list acak yang disatukan)
-  const buckets = [
-    "fairblock:tokens",
-    "gallery:tokens",
-    "fb:tokens",
-    "fairblock:deleteTokens",
-  ];
-
-  const candidates = new Set<string>();
-  for (const key of buckets) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const obj = JSON.parse(raw);
-      if (obj && typeof obj === "object") {
-        if (Array.isArray(obj)) {
-          for (const it of obj) {
-            if (Array.isArray(it) && it[1]) candidates.add(String(it[1]));
-            else if (it && typeof it === "object" && it.token) candidates.add(String(it.token));
-          }
-        } else {
-          for (const [k, v] of Object.entries(obj)) {
-            // kalau map id->token lama, ambil tokennya
-            candidates.add(String(v as any));
-          }
-        }
-      }
-    } catch {}
-  }
-
-  if (!candidates.size) return; // tidak ada yang bisa direbind
-
-  // Hash semua kandidat agar bisa dibandingkan cepat
-  const tokenList = Array.from(candidates);
-  const hashes = await Promise.all(tokenList.map((t) => sha256Hex(t)));
-  const hashToToken = new Map<string, string>();
-  hashes.forEach((h, i) => hashToToken.set(h, tokenList[i]));
-
-  // 2) Ambil map saat ini (biar tidak overwrite yang sudah ada)
-  const now = readTokenMap();
-  let changed = false;
-
-  // 3) Loop karya, fetch meta & cocokkan
-  for (const it of items) {
-    if (!it.metaUrl) continue;
-    if (now[it.id]) continue; // sudah ada
-
-    try {
-      const res = await fetch(`${it.metaUrl}?v=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) continue;
-      const meta = await res.json();
-      const h = String(meta?.ownerTokenHash || "");
-      if (!h) continue;
-
-      const matched = hashToToken.get(h);
-      if (matched) {
-        now[it.id] = matched;
-        changed = true;
-      }
-    } catch {
-      // skip satu item kalau gagal
-    }
-  }
-
-  if (changed) writeTokenMap(now);
-}
-
 async function copyTextForce(text: string) {
   if (!text) return false;
   try {
@@ -148,6 +55,78 @@ async function copyTextForce(text: string) {
   }
 }
 
+/** Hash helper (hex, sama seperti server sha256) */
+async function sha256Hex(input: string) {
+  const enc = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  const arr = Array.from(new Uint8Array(buf));
+  return arr.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Gabung semua kemungkinan storage lama jadi 1 map {idOrKey: token} */
+function readAllLegacyTokenMaps(): Record<string, string> {
+  const keys = ["fairblock:tokens", "fb:tokens", "gallery:tokens", "fairblock:deleteTokens"];
+  const out: Record<string, string> = {};
+  for (const k of keys) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== "object") continue;
+
+      if (Array.isArray(obj)) {
+        for (const it of obj) {
+          if (Array.isArray(it) && it[0] && it[1]) out[String(it[0])] = String(it[1]);
+          else if (it && typeof it === "object" && it.id && it.token) out[String(it.id)] = String(it.token);
+        }
+      } else {
+        for (const [id, t] of Object.entries(obj)) out[String(id)] = String(t as any);
+      }
+    } catch {}
+  }
+  return out;
+}
+
+/** Simpan map final owner tokens hanya ke key baru "fairblock:tokens" */
+function writeOwnerMap(map: Record<string, string>) {
+  try {
+    localStorage.setItem("fairblock:tokens", JSON.stringify(map));
+  } catch {}
+}
+
+/** Auto-rebind: cocokan token lama (by hash) ke item yang tampil */
+async function autoRebindLegacyTokens(items: GalleryItem[]) {
+  if (typeof window === "undefined" || !items?.length) return;
+
+  // ambil map saat ini & semua kandidat token lama
+  let current: Record<string, string> = {};
+  try { current = JSON.parse(localStorage.getItem("fairblock:tokens") || "{}"); } catch {}
+
+  const candidates = readAllLegacyTokenMaps();
+  const candidateList = Object.values(candidates).filter(Boolean);
+  if (!candidateList.length) return;
+
+  // Buat lookup hash => token (biar hash sekali per token)
+  const hashToToken: Record<string, string> = {};
+  await Promise.all(candidateList.map(async (tok) => {
+    const h = await sha256Hex(tok);
+    hashToToken[h] = tok;
+  }));
+
+  // Cocokkan per item (yang belum punya token)
+  let changed = false;
+  for (const it of items) {
+    if (!it.ownerTokenHash || current[it.id]) continue;
+    const token = hashToToken[it.ownerTokenHash];
+    if (token) {
+      current[it.id] = token;
+      changed = true;
+    }
+  }
+
+  if (changed) writeOwnerMap(current);
+}
+
 export default function GalleryClient() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [likes, setLikes] = useState<LikeMap>({});
@@ -169,10 +148,8 @@ export default function GalleryClient() {
       const list: GalleryItem[] = j?.items || [];
       setItems(list);
 
-      // 🔁 Rebind otomatis (sekali saat page load)
-      try {
-        await rebindLegacyTokens(list);
-      } catch {}
+      // 🔁 rebind token lama -> id baru
+      await autoRebindLegacyTokens(list);
 
       if (list.length) {
         const ids = list.map((i) => i.id).join(",");
@@ -299,16 +276,7 @@ export default function GalleryClient() {
       {loading ? (
         <p className="opacity-70">Loading…</p>
       ) : filtered.length === 0 ? (
-        <div className="opacity-80 space-y-2">
-          <p>No artworks found.</p>
-          {onlyMine && (
-            <p className="text-sm">
-              Kamu mengaktifkan <b>Only My Uploads</b>. Jika upload lama tidak muncul (mis. dari
-              deploy lama), cukup buka kembali galeri ini di browser yang sama — sistem akan
-              otomatis mendeteksi kepemilikan tanpa perlu klaim.
-            </p>
-          )}
-        </div>
+        <p className="opacity-70">No artworks found.</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
           {filtered.map((it, idx) => {
@@ -326,7 +294,7 @@ export default function GalleryClient() {
                   <img
                     src={it.url}
                     alt={it.title}
-                    className="w-full aspect-[4/3] object-contain bg-black/20 transition-transform duration-300 hover:scale-[1.01]"
+                    className="w-full aspect-[4/3] object-contain bg-black/20"  // tampilkan full (tanpa crop)
                   />
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
                   <button
@@ -419,7 +387,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* === Lightbox separuh layar === */}
+      {/* === Lightbox === */}
       {selectedIndex !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
