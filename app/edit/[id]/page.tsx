@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { getOwnerToken } from "@/lib/storage"; // ⬅️ pakai token global yang benar
 
 type Artwork = {
   id: string;
@@ -14,15 +15,9 @@ type Artwork = {
   postUrl?: string;
 };
 
-function getOwnerTokenFor(id: string): string | null {
-  try {
-    const raw = localStorage.getItem("fairblock:tokens");
-    if (!raw) return null;
-    const map = JSON.parse(raw || "{}");
-    return map?.[id] || null;
-  } catch {
-    return null;
-  }
+function at(x?: string) {
+  if (!x) return "";
+  return x.startsWith("@") ? x : `@${x}`;
 }
 
 export default function EditArtworkPage() {
@@ -45,7 +40,7 @@ export default function EditArtworkPage() {
       try {
         const j = await fetch("/api/gallery", { cache: "no-store" }).then(r => r.json());
         const list: Artwork[] = j?.items || [];
-        const found = list.find(a => a.id === id) || null;
+        const found = list.find((a) => a.id === id) || null;
         if (!found) {
           alert("Artwork not found.");
           router.push("/gallery");
@@ -62,25 +57,13 @@ export default function EditArtworkPage() {
     })();
   }, [id, router]);
 
-  // helper: parse response aman
-  async function parseResponse(resp: Response) {
-    const ct = resp.headers.get("content-type") || "";
-    if (resp.status === 204) return { ok: resp.ok, data: { success: true } };
-    if (ct.includes("application/json")) {
-      const data = await resp.json().catch(() => ({}));
-      return { ok: resp.ok, data };
-    }
-    const text = await resp.text().catch(() => "");
-    return { ok: resp.ok, data: resp.ok ? { success: true } : { success: false, error: text || resp.statusText } };
-  }
-
-  // Save changes – coba PATCH ⇒ PUT ⇒ POST override ⇒ POST /api/art (action:update)
   async function onSave() {
     if (!item) return;
 
-    const token = getOwnerTokenFor(item.id);
+    // ⬇⬇ gunakan token global yg sama dengan yg disimpan saat submit (meta.ownerToken)
+    const token = getOwnerToken();
     if (!token) {
-      alert("Delete/Edit token not found. Gunakan browser yang sama saat submit.");
+      alert("Owner token not found in this browser. Gunakan browser yang sama saat submit.");
       return;
     }
     if (!item.metaUrl) {
@@ -92,58 +75,26 @@ export default function EditArtworkPage() {
     try {
       const patch = {
         title: title.trim(),
-        x: x.trim(),
-        discord: discord.trim(),
+        x: at(x.trim()),
+        discord: at(discord.trim()),
         postUrl: postUrl.trim(),
       };
 
-      const urlWithId = `/api/art/${item.id}`;
-      const body = JSON.stringify({ token, metaUrl: item.metaUrl, patch });
-
-      // 1) PATCH
-      let resp = await fetch(urlWithId, {
+      // coba PATCH → (server kita juga support PUT/override, tapi PATCH cukup)
+      const resp = await fetch(`/api/art/${item.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body,
+        body: JSON.stringify({ token, metaUrl: item.metaUrl, patch }),
       });
-      if (resp.status === 405) {
-        // 2) PUT
-        resp = await fetch(urlWithId, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body,
-        });
-      }
-      if (resp.status === 405) {
-        // 3) POST override (ke /api/art/:id)
-        resp = await fetch(urlWithId, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "X-HTTP-Method-Override": "PATCH",
-          },
-          body: JSON.stringify({ token, metaUrl: item.metaUrl, patch, _method: "PATCH" }),
-        });
-      }
-      if (resp.status === 405) {
-        // 4) POST ke /api/art (tanpa :id) dgn action:update
-        resp = await fetch("/api/art", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            action: "update",
-            id: item.id,
-            token,
-            metaUrl: item.metaUrl,
-            patch,
-          }),
-        });
-      }
 
-      const { ok, data } = await parseResponse(resp);
-      if (!ok || data?.success === false) {
-        const msg = data?.error || `${resp.status} ${resp.statusText}`;
-        throw new Error(msg);
+      const ct = resp.headers.get("content-type") || "";
+      let data: any = null;
+      if (resp.status === 204) data = { success: true };
+      else if (ct.includes("application/json")) data = await resp.json();
+      else data = resp.ok ? { success: true } : { success: false, error: await resp.text() };
+
+      if (!resp.ok || data?.success === false) {
+        throw new Error(data?.error || `${resp.status} ${resp.statusText}`);
       }
 
       alert("Saved successfully!");
