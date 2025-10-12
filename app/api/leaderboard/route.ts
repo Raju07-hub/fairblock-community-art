@@ -14,19 +14,12 @@ function toPairs(a: any[]) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const range = (searchParams.get("range") || "weekly").toLowerCase(); // weekly | monthly
+    const range = (searchParams.get("range") || "weekly").toLowerCase();
 
     let key: string;
-    if (range === "weekly") {
-      key = `lb:art:weekly:${weekSatUTC()}`;
-    } else if (range === "monthly") {
-      key = `lb:art:monthly:${ym()}`;
-    } else {
-      return NextResponse.json(
-        { success: false, error: "range must be 'weekly' or 'monthly'" },
-        { status: 400 }
-      );
-    }
+    if (range === "weekly") key = `lb:art:weekly:${weekSatUTC()}`;
+    else if (range === "monthly") key = `lb:art:monthly:${ym()}`;
+    else return NextResponse.json({ success: false, error: "range must be 'weekly' or 'monthly'" }, { status: 400 });
 
     const arr = await (kv as any).zrevrange(key, 0, 99, { withscores: true });
     const topArts = toPairs(arr);
