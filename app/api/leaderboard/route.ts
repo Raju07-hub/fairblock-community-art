@@ -11,24 +11,37 @@ function toPairs(a: any[]) {
   return out;
 }
 
+// Compat helper: pakai zrevrange kalau tersedia; kalau tidak, fallback ke zrange(..., { rev: true })
+async function zTopWithScores(key: string, start = 0, stop = 99) {
+  const anyKv = kv as any;
+  if (typeof anyKv.zrevrange === "function") {
+    return await anyKv.zrevrange(key, start, stop, { withscores: true });
+  }
+  return await anyKv.zrange(key, start, stop, { rev: true, withScores: true });
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const range = (searchParams.get("range") || "weekly").toLowerCase();
+    const range = (searchParams.get("range") || "weekly").toLowerCase(); // weekly | monthly
 
     const key =
-      range === "weekly"  ? `lb:art:weekly:${weekSatUTC()}` :
-      range === "monthly" ? `lb:art:monthly:${ym()}` : null;
+      range === "weekly"
+        ? `lb:art:weekly:${weekSatUTC()}`
+        : range === "monthly"
+        ? `lb:art:monthly:${ym()}`
+        : null;
 
     if (!key) {
       return NextResponse.json({ success: false, error: "range must be 'weekly' or 'monthly'" }, { status: 400 });
     }
 
-    const arr = await (kv as any).zrevrange(key, 0, 99, { withscores: true });
+    // Ambil ranking Top Art (by likes)
+    const arr = await zTopWithScores(key, 0, 99);
     const pairs = toPairs(arr || []);
 
-    // join metadata gallery
-    const gRes  = await fetch(new URL("/api/gallery", req.url), { cache: "no-store" }).catch(() => null);
+    // Join metadata gallery
+    const gRes = await fetch(new URL("/api/gallery", req.url), { cache: "no-store" }).catch(() => null);
     const gJson = (await gRes?.json().catch(() => null)) as any;
     const items: any[] = gJson?.items || [];
     const map = new Map(items.map(i => [String(i.id), i]));

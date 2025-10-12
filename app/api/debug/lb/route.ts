@@ -11,19 +11,23 @@ function toPairs(a: any[]) {
   return out;
 }
 
+async function zTopWithScores(key: string, start = 0, stop = 50) {
+  const anyKv = kv as any;
+  if (typeof anyKv.zrevrange === "function") {
+    return await anyKv.zrevrange(key, start, stop, { withscores: true });
+  }
+  return await anyKv.zrange(key, start, stop, { rev: true, withScores: true });
+}
+
 export async function GET() {
-  const wArtKey = `lb:art:weekly:${weekSatUTC()}`;
-  const mArtKey = `lb:art:monthly:${ym()}`;
+  const wKey = `lb:art:weekly:${weekSatUTC()}`;
+  const mKey = `lb:art:monthly:${ym()}`;
 
-  const [wA, mA] = await Promise.all([
-    (kv as any).zrevrange(wArtKey, 0, 50, { withscores: true }),
-    (kv as any).zrevrange(mArtKey, 0, 50, { withscores: true }),
-  ]);
-
+  const [w, m] = await Promise.all([zTopWithScores(wKey), zTopWithScores(mKey)]);
   return NextResponse.json({
-    weekKeyArt: wArtKey,
-    monthKeyArt: mArtKey,
-    weeklyArt: toPairs(wA || []),
-    monthlyArt: toPairs(mA || []),
+    weekKey: wKey,
+    monthKey: mKey,
+    weeklyArt: toPairs(w || []),
+    monthlyArt: toPairs(m || []),
   });
 }
