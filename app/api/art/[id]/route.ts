@@ -49,13 +49,16 @@ function mergeMeta(curr: any, patch: PatchBody["patch"]) {
 async function saveMeta(id: string, meta: any) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error("BLOB_READ_WRITE_TOKEN is missing");
   const path = `fairblock/meta/${id}.json`;
+
   const { url } = await put(path, JSON.stringify(meta, null, 2), {
     access: "public",
     contentType: "application/json",
     token: process.env.BLOB_READ_WRITE_TOKEN,
     addRandomSuffix: false,
     cacheControlMaxAge: 0,
+    allowOverwrite: true, // ✅ tambahkan baris ini
   });
+
   return url;
 }
 
