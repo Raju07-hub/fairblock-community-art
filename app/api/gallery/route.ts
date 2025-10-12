@@ -24,25 +24,31 @@ function headerNoStore() {
   };
 }
 
-// ---- NEW: coba beberapa prefix & fallback ----
+// Prefix kandidat; bisa override lewat env BLOB_META_PREFIX
 const CANDIDATE_PREFIXES = [
-  process.env.BLOB_META_PREFIX,       // bisa set di Vercel bila perlu
+  process.env.BLOB_META_PREFIX, // optional
   "fairblock/meta/",
   "fb/meta/",
   "fairblockcom/meta/",
 ].filter(Boolean) as string[];
 
 async function listWithFallback(list: ListFn) {
-  // 1) coba candidate prefixes satu per satu
+  // 1) coba tiap prefix
   for (const prefix of CANDIDATE_PREFIXES) {
     const r = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
       prefix,
       limit: 1000,
     });
-    if (r.blobs?.length) return { source: `prefix:${prefix}`, blobs: r.blobs };
+    if (r.blobs?.length) {
+      // hanya file .json
+      const blobs = (r.blobs || []).filter(
+        (b) => typeof b.pathname === "string" && /\.json$/i.test(b.pathname)
+      );
+      if (blobs.length) return { source: `prefix:${prefix}`, blobs };
+    }
   }
-  // 2) fallback tanpa prefix: ambil semuanya lalu filter yang mengandung "/meta/"
+  // 2) fallback: scan semua lalu filter "/meta/" + .json
   const rAll = await list({
     token: process.env.BLOB_READ_WRITE_TOKEN,
     limit: 1000,
@@ -50,9 +56,23 @@ async function listWithFallback(list: ListFn) {
   const blobs = (rAll.blobs || []).filter(
     (b) =>
       typeof b.pathname === "string" &&
-      /\/meta\/.+\.(json|txt|data)$/i.test(b.pathname)
+      /\/meta\/.+\.json$/i.test(b.pathname)
   );
   return { source: "fallback:scan-all", blobs };
+}
+
+// Parser toleran: coba json(); kalau gagal, coba text() -> JSON.parse
+async function parseJsonTolerant(res: Response) {
+  const ct = res.headers.get("content-type") || "";
+  try {
+    if (/application\/json/i.test(ct)) return await res.json();
+  } catch {}
+  try {
+    const txt = await res.text();
+    return JSON.parse(txt);
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(req: Request) {
@@ -62,26 +82,34 @@ export async function GET(req: Request) {
 
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json(
-        { success: true, items: [], nextCursor: null, count: 0, note: "missing BLOB_READ_WRITE_TOKEN" },
+        {
+          success: true,
+          items: [],
+          nextCursor: null,
+          count: 0,
+          note: "missing BLOB_READ_WRITE_TOKEN",
+        },
         { headers: headerNoStore() }
       );
     }
 
     const { list } = (await import("@vercel/blob")) as { list: ListFn };
 
-    // --- use fallback listing ---
+    // listing dengan fallback
     const { source, blobs } = await listWithFallback(list);
 
     const bust = Date.now();
     const items = await Promise.all(
       (blobs || []).map(async (b) => {
         try {
+          // pastikan hanya .json yang diproses
+          if (!b.pathname || !/\.json$/i.test(b.pathname)) return null;
+
           const res = await fetch(`${b.url}?v=${bust}`, { cache: "no-store" });
           if (!res.ok) return null;
-          const ctype = res.headers.get("content-type") || "";
-          if (!/application\/json/i.test(ctype)) return null;
 
-          const meta = await res.json();
+          const meta = await parseJsonTolerant(res);
+          if (!meta || typeof meta !== "object") return null;
 
           const fromMeta: string =
             (meta?.imageUrl as string) || (meta?.url as string) || "";
@@ -94,7 +122,10 @@ export async function GET(req: Request) {
           // normalize createdAt
           let createdAt = "";
           if (typeof meta.createdAt === "string") createdAt = meta.createdAt;
-          else if (typeof meta.createdAt === "number" && Number.isFinite(meta.createdAt)) {
+          else if (
+            typeof meta.createdAt === "number" &&
+            Number.isFinite(meta.createdAt)
+          ) {
             createdAt = new Date(meta.createdAt).toISOString();
           }
 
@@ -107,7 +138,10 @@ export async function GET(req: Request) {
             url: imageUrl,
             createdAt,
             metaUrl: b.url,
-            ownerTokenHash: typeof meta.ownerTokenHash === "string" ? meta.ownerTokenHash : "",
+            ownerTokenHash:
+              typeof meta.ownerTokenHash === "string"
+                ? meta.ownerTokenHash
+                : "",
           };
         } catch {
           return null;
