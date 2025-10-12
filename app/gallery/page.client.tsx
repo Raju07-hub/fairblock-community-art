@@ -230,6 +230,12 @@ async function autoFirstClaimMissingOwnerHash(items: GalleryItem[]) {
   }
 }
 
+/** Helper waktu aman untuk sorting (anti-NaN) */
+const getTimeSafe = (d?: string) => {
+  const t = d ? Date.parse(d) : NaN;
+  return Number.isFinite(t) ? t : 0;
+};
+
 export default function GalleryClient() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [likes, setLikes] = useState<LikeMap>({});
@@ -296,8 +302,8 @@ export default function GalleryClient() {
       .slice()
       .sort((a, b) =>
         sort === "newest"
-          ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          ? getTimeSafe(b.createdAt) - getTimeSafe(a.createdAt)
+          : getTimeSafe(a.createdAt) - getTimeSafe(b.createdAt)
       );
     return list;
   }, [items, query, onlyMine, sort]);

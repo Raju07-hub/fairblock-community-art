@@ -1,6 +1,7 @@
 // app/api/gallery/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 import { NextResponse } from "next/server";
 
@@ -15,34 +16,33 @@ function normHandle(v?: string) {
   return `@${noAt}`;
 }
 
+function headerNoStore() {
+  return {
+    "cache-control": "no-store, no-cache, must-revalidate",
+    pragma: "no-cache",
+    "surrogate-control": "no-store",
+    "x-accel-expires": "0",
+  };
+}
+
 export async function GET() {
   try {
-    // Jika token tidak diset, return kosong agar tidak error
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json(
         { success: true, items: [], nextCursor: null, count: 0 },
-        {
-          headers: {
-            "cache-control": "no-store, no-cache, must-revalidate",
-            pragma: "no-cache",
-            "surrogate-control": "no-store",
-            "x-accel-expires": "0",
-          },
-        }
+        { headers: headerNoStore() }
       );
     }
 
-    // === Ambil list meta blobs dari Vercel Blob ===
     const { list } = (await import("@vercel/blob")) as { list: ListFn };
     const { blobs } = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
       prefix: "fairblock/meta/",
-      limit: 100,
+      limit: 500, // cukup tinggi supaya tidak kepotong
     });
 
     const bust = Date.now();
 
-    // === Ambil isi tiap meta.json dan bentuk array items ===
     const items = await Promise.all(
       blobs.map(async (b) => {
         try {
@@ -50,19 +50,24 @@ export async function GET() {
           if (!res.ok) return null;
           const meta = await res.json();
 
-          const imageUrl: string | undefined = meta.imageUrl || meta.url;
-          if (!meta?.id || !meta?.title || !imageUrl) return null;
+          // Robust image URL: pakai imageUrl lalu fallback ke url; keduanya harus http(s)
+          const fromMeta = (meta?.imageUrl as string) || (meta?.url as string) || "";
+          const imageUrl =
+            typeof fromMeta === "string" && /^https?:\/\//i.test(fromMeta) ? fromMeta : "";
+
+          // Minimal syarat: ada id & imageUrl agar bisa dirender
+          if (!meta?.id || !imageUrl) return null;
 
           return {
             id: String(meta.id),
-            title: String(meta.title),
+            title: typeof meta.title === "string" ? meta.title : "", // jangan buang item hanya karena title kosong
             x: normHandle(meta.x),
             discord: normHandle(meta.discord),
-            postUrl: meta.postUrl ? String(meta.postUrl) : "",
+            postUrl: typeof meta.postUrl === "string" ? meta.postUrl : "",
             url: imageUrl,
-            createdAt: String(meta.createdAt || ""),
+            createdAt: typeof meta.createdAt === "string" ? meta.createdAt : "", // biar sorter client yang menormalkan
             metaUrl: b.url,
-            ownerTokenHash: String(meta.ownerTokenHash || ""), // ← penting untuk auto rebind token lama
+            ownerTokenHash: typeof meta.ownerTokenHash === "string" ? meta.ownerTokenHash : "",
           };
         } catch {
           return null;
@@ -70,37 +75,21 @@ export async function GET() {
       })
     );
 
-    // === Urutkan berdasarkan tanggal terbaru ===
-    const filtered = (items.filter(Boolean) as any[]).sort(
-      (a, b) =>
-        (new Date(b.createdAt).getTime() || 0) -
-        (new Date(a.createdAt).getTime() || 0)
-    );
+    // Urutkan newest dengan toleransi (createdAt kosong akan dianggap 0 di client)
+    const filtered = (items.filter(Boolean) as any[]).sort((a, b) => {
+      const tb = Date.parse(b.createdAt || "");
+      const ta = Date.parse(a.createdAt || "");
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
 
-    // === Return response JSON tanpa cache ===
     return NextResponse.json(
       { success: true, items: filtered, nextCursor: null, count: filtered.length },
-      {
-        headers: {
-          "cache-control": "no-store, no-cache, must-revalidate",
-          pragma: "no-cache",
-          "surrogate-control": "no-store",
-          "x-accel-expires": "0",
-        },
-      }
+      { headers: headerNoStore() }
     );
   } catch (e: any) {
     return NextResponse.json(
       { success: false, error: e?.message || "Failed to fetch gallery" },
-      {
-        status: 500,
-        headers: {
-          "cache-control": "no-store",
-          pragma: "no-cache",
-          "surrogate-control": "no-store",
-          "x-accel-expires": "0",
-        },
-      }
+      { status: 500, headers: headerNoStore() }
     );
   }
 }
