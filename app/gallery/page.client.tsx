@@ -13,7 +13,7 @@ type GalleryItem = {
   createdAt: string;
   metaUrl: string;
   postUrl?: string;
-  ownerTokenHash?: string; // NEW (mungkin kosong utk karya lama)
+  ownerTokenHash?: string;
 };
 
 type LikeMap = Record<string, { count: number; liked: boolean }>;
@@ -23,7 +23,6 @@ function at(x?: string) {
   return x.startsWith("@") ? x : `@${x}`;
 }
 
-/** legacy: token per-ID yang disimpan saat submit versi lama */
 function getLegacyTokenFor(id: string): string | null {
   try {
     const raw = localStorage.getItem("fairblock:tokens");
@@ -35,7 +34,6 @@ function getLegacyTokenFor(id: string): string | null {
   }
 }
 
-/** global owner token (versi baru) */
 function getGlobalOwnerToken(): string | null {
   try {
     return localStorage.getItem("fairblock:owner-token");
@@ -44,7 +42,6 @@ function getGlobalOwnerToken(): string | null {
   }
 }
 
-/** list semua token yang ada di browser (global + semua legacy) */
 function getAllLocalTokens(): string[] {
   const out: string[] = [];
   const g = getGlobalOwnerToken();
@@ -97,7 +94,6 @@ export default function GalleryClient() {
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
-  // simpan hash semua token lokal (utk cocokkan dgn ownerTokenHash jika ada)
   const [localTokenHashes, setLocalTokenHashes] = useState<Set<string>>(new Set());
 
   // lightbox
@@ -120,6 +116,24 @@ export default function GalleryClient() {
       const j = await fetch(`/api/gallery?ts=${ts}`, { cache: "no-store" }).then((r) => r.json());
       const list: GalleryItem[] = j?.items || [];
       setItems(list);
+
+      // MIGRASI: tambahkan ownerTokenHash utk karya lama yg punya legacy token
+      (async () => {
+        for (const it of list) {
+          if (!it.ownerTokenHash) {
+            const legacy = getLegacyTokenFor(it.id);
+            if (legacy) {
+              try {
+                await fetch(`/api/art/${it.id}`, {
+                  method: "PATCH",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ token: legacy, metaUrl: it.metaUrl, patch: {} }),
+                });
+              } catch {}
+            }
+          }
+        }
+      })();
 
       if (list.length) {
         const ids = list.map((i) => i.id).join(",");
@@ -148,16 +162,9 @@ export default function GalleryClient() {
     }
   }
 
-  /** Apakah item ini milik user?
-   *  - Jika meta punya ownerTokenHash: cocokkan dgn hash token lokal
-   *  - Jika TIDAK ada ownerTokenHash (karya lama): cek token legacy per-ID
-   */
   function isOwner(it: GalleryItem): boolean {
-    if (it.ownerTokenHash) {
-      return localTokenHashes.has(it.ownerTokenHash);
-    }
-    // fallback legacy
-    return !!getLegacyTokenFor(it.id);
+    if (it.ownerTokenHash) return localTokenHashes.has(it.ownerTokenHash);
+    return !!getLegacyTokenFor(it.id); // fallback karya lama
   }
 
   const filtered = useMemo(() => {
@@ -177,24 +184,10 @@ export default function GalleryClient() {
     return list;
   }, [items, query, onlyMine, sort, localTokenHashes]);
 
-  // --- Lightbox helpers
-  function openAt(i: number) {
-    setAnimDir(null);
-    setSelectedIndex(i);
-  }
-  function closeLightbox() {
-    setSelectedIndex(null);
-  }
-  function prevImage() {
-    if (selectedIndex === null) return;
-    setAnimDir("left");
-    setSelectedIndex((i) => (i! > 0 ? i! - 1 : filtered.length - 1));
-  }
-  function nextImage() {
-    if (selectedIndex === null) return;
-    setAnimDir("right");
-    setSelectedIndex((i) => (i! < filtered.length - 1 ? i! + 1 : 0));
-  }
+  function openAt(i: number) { setAnimDir(null); setSelectedIndex(i); }
+  function closeLightbox() { setSelectedIndex(null); }
+  function prevImage() { if (selectedIndex === null) return; setAnimDir("left"); setSelectedIndex((i) => (i! > 0 ? i! - 1 : filtered.length - 1)); }
+  function nextImage() { if (selectedIndex === null) return; setAnimDir("right"); setSelectedIndex((i) => (i! < filtered.length - 1 ? i! + 1 : 0)); }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -241,11 +234,7 @@ export default function GalleryClient() {
           </select>
 
           <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={onlyMine}
-              onChange={(e) => setOnlyMine(e.target.checked)}
-            />
+            <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
             Only My Uploads
           </label>
 
@@ -273,7 +262,6 @@ export default function GalleryClient() {
             return (
               <div key={it.id} className="glass rounded-2xl overflow-hidden card-hover transition transform hover:scale-[1.02]">
                 <div className="relative cursor-pointer" onClick={() => openAt(idx)}>
-                  {/* tampilkan utuh tanpa cropping */}
                   <div className="w-full aspect-[4/3] bg-black/10 flex items-center justify-center overflow-hidden">
                     <img
                       src={it.url}
@@ -336,9 +324,6 @@ export default function GalleryClient() {
                       <Link href={`/edit/${it.id}`} className="btn px-3 py-1 text-xs bg-white/10">✏️ Edit</Link>
                       <button
                         onClick={async () => {
-                          // pilih token terbaik utk delete:
-                          // 1) token legacy per-ID (jika ada)
-                          // 2) selain itu ambil global/pertama yang tersedia
                           const legacy = getLegacyTokenFor(it.id);
                           const all = getAllLocalTokens();
                           const token = legacy || all[0];
@@ -348,10 +333,7 @@ export default function GalleryClient() {
                           try {
                             const res = await fetch(`/api/art/${it.id}`, {
                               method: "DELETE",
-                              headers: {
-                                "content-type": "application/json",
-                                "x-owner-token": token,
-                              },
+                              headers: { "content-type": "application/json", "x-owner-token": token },
                               body: JSON.stringify({ metaUrl: it.metaUrl }),
                             });
                             const j = await res.json();
@@ -402,26 +384,14 @@ export default function GalleryClient() {
                 className="max-h-[70vh] w-auto rounded-xl shadow-2xl object-contain"
               />
 
-              <button
-                className="absolute top-3 right-3 bg-white/20 hover:bg-white/30 rounded-full p-2"
-                onClick={closeLightbox}
-                aria-label="Close preview"
-              >
+              <button className="absolute top-3 right-3 bg-white/20 hover:bg-white/30 rounded-full p-2" onClick={closeLightbox} aria-label="Close preview">
                 <X className="w-6 h-6 text-white" />
               </button>
 
-              <button
-                className="absolute left-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
-                onClick={prevImage}
-                aria-label="Previous artwork"
-              >
+              <button className="absolute left-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full" onClick={prevImage} aria-label="Previous artwork">
                 <ChevronLeft className="w-6 h-6" />
               </button>
-              <button
-                className="absolute right-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full"
-                onClick={nextImage}
-                aria-label="Next artwork"
-              >
+              <button className="absolute right-3 text-white bg-black/40 hover:bg-black/60 p-3 rounded-full" onClick={nextImage} aria-label="Next artwork">
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
@@ -445,12 +415,7 @@ export default function GalleryClient() {
                     <div className="font-semibold">{sel.title}</div>
                     <div className="text-sm text-white/70 mt-1">
                       {xHandle && (
-                        <a
-                          href={xUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline text-sky-300 hover:text-sky-200"
-                        >
+                        <a href={xUrl} target="_blank" rel="noreferrer" className="underline text-sky-300 hover:text-sky-200">
                           {xHandle}
                         </a>
                       )}
@@ -463,12 +428,7 @@ export default function GalleryClient() {
                     </div>
                   </div>
                   {openPost && (
-                    <a
-                      href={openPost}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn px-4 py-1 text-sm"
-                    >
+                    <a href={openPost} target="_blank" rel="noreferrer" className="btn px-4 py-1 text-sm">
                       Open Art Post ↗
                     </a>
                   )}

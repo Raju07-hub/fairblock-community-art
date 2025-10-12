@@ -37,7 +37,6 @@ export async function GET() {
       limit: 100,
     });
 
-    // bust cache sekali untuk fetch meta di request ini
     const bust = Date.now();
 
     const items = await Promise.all(
@@ -59,8 +58,7 @@ export async function GET() {
             url: imageUrl,
             createdAt: String(meta.createdAt || ""),
             metaUrl: b.url,
-            // kirim hash kepemilikan agar client bisa cocokkan token lokal
-            ownerTokenHash: String(meta.ownerTokenHash || ""),
+            ownerTokenHash: meta.ownerTokenHash ? String(meta.ownerTokenHash) : undefined, // ← NEW
           };
         } catch {
           return null;

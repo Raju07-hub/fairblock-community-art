@@ -11,7 +11,6 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const normHandle = (v?: string) => (v ? "@" + String(v).trim().replace(/^@/, "") : "");
 const normPostUrl = (u?: string) => (u && /^https?:\/\//i.test(u) ? u : "");
 
-/* ---------- OPTIONS (preflight) ---------- */
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
@@ -22,12 +21,11 @@ export async function OPTIONS() {
   });
 }
 
-/* ---------- DELETE ---------- */
 export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> }) {
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN)
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json({ success: false, error: "Missing BLOB_READ_WRITE_TOKEN" }, { status: 500 });
-
+    }
     const { id } = await ctx.params;
     const body = await req.json().catch(() => ({} as any));
     const metaUrl: string = body?.metaUrl || "";
@@ -37,17 +35,15 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> })
       body?.token ||
       "";
 
-    if (!id || !metaUrl)
-      return NextResponse.json({ success: false, error: "Missing id or metaUrl" }, { status: 400 });
+    if (!id) return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
+    if (!metaUrl) return NextResponse.json({ success: false, error: "Missing metaUrl" }, { status: 400 });
 
     const metaRes = await fetch(metaUrl, { cache: "no-store" });
-    if (!metaRes.ok)
-      return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
+    if (!metaRes.ok) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     const meta = await metaRes.json();
 
     const ok = !!provided && (provided === meta.ownerTokenHash || sha256(provided) === meta.ownerTokenHash);
-    if (!ok)
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    if (!ok) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
     const files = [metaUrl];
     if (meta?.imageUrl) files.push(meta.imageUrl);
@@ -59,34 +55,45 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<Params> })
   }
 }
 
-/* ---------- EDIT (PUT/PATCH/POST) ---------- */
+/* ---------- EDIT (PUT/POST/PATCH) ---------- */
 async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN)
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json({ success: false, error: "Missing BLOB_READ_WRITE_TOKEN" }, { status: 500 });
-
+    }
     const { id } = await ctx.params;
+    if (!id) return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 });
+
     const raw = await req.json().catch(() => ({} as any));
     const metaUrl: string = raw?.metaUrl || raw?.patch?.metaUrl || "";
-    const provided = req.headers.get("x-owner-token") || raw?.token || raw?.patch?.token || "";
-    const patch = raw?.patch || raw || {};
-    const { title, x, discord, postUrl } = patch;
+    const provided =
+      req.headers.get("x-owner-token") ||
+      raw?.token ||
+      raw?.patch?.token ||
+      "";
 
-    if (!id || !metaUrl)
-      return NextResponse.json({ success: false, error: "Missing id or metaUrl" }, { status: 400 });
+    const patch = raw?.patch || raw || {};
+    const title = patch?.title;
+    const x = patch?.x;
+    const discord = patch?.discord;
+    const postUrl = patch?.postUrl;
+
+    if (!metaUrl) return NextResponse.json({ success: false, error: "Missing metaUrl" }, { status: 400 });
 
     const metaRes = await fetch(metaUrl, { cache: "no-store" });
-    if (!metaRes.ok)
-      return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
+    if (!metaRes.ok) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     const old = await metaRes.json();
 
     const ok =
       !!provided &&
       (provided === old.ownerTokenHash || sha256(provided) === old.ownerTokenHash);
-    if (!ok)
+    if (!ok && old.ownerTokenHash) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
 
-    const now = new Date().toISOString();
+    // MIGRASI: kalau meta lama belum punya ownerTokenHash, dan ada token 'provided', isi sekarang
+    const ensuredOwnerHash =
+      old.ownerTokenHash || (provided ? sha256(provided) : undefined);
 
     const nextMeta = {
       id: old.id,
@@ -96,15 +103,14 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
       postUrl: normPostUrl(postUrl ?? old.postUrl),
       imageUrl: old.imageUrl,
       createdAt: old.createdAt,
-      updatedAt: now, // ⬅️ penting untuk cache busting
-      ownerTokenHash: old.ownerTokenHash,
+      ownerTokenHash: ensuredOwnerHash, // ← pastikan terisi setelah migrasi
     };
 
     await blobPut(`fairblock/meta/${id}.json`, Buffer.from(JSON.stringify(nextMeta)), {
       access: "public",
       contentType: "application/json",
       token: process.env.BLOB_READ_WRITE_TOKEN!,
-      allowOverwrite: true, // ⬅️ fix overwrite error
+      allowOverwrite: true,
     });
 
     return NextResponse.json({ success: true, meta: nextMeta });
@@ -114,5 +120,5 @@ async function editHandler(req: NextRequest, ctx: { params: Promise<Params> }) {
 }
 
 export const PUT = editHandler;
-export const PATCH = editHandler;
 export const POST = editHandler;
+export const PATCH = editHandler;
